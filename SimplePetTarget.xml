@@ -7,6 +7,13 @@
 		the game hides from addons in combat.
 	-->
 
+	<!--
+		One debuff, as an extra template for the buttons of Blizzard's secure aura container: the
+		container creates them from "CustomAuraButtonTemplate, SimplePetTargetDebuffTemplate". This is
+		TargetofTargetDebuffFrameTemplate without names (the buttons are unnamed, so parentKeys only)
+		and without scripts (the buttons never run addon scripts; their own tooltip replaces Blizzard's
+		OnEnter and OnLeave). SimplePetTarget.lua hands Icon, Border and Cooldown to each new button.
+	-->
 	<Frame name="SimplePetTargetDebuffTemplate" virtual="true" enableMouse="true" hidden="true">
 		<Size x="12" y="12"/>
 		<Layers>
@@ -25,7 +32,8 @@
 			</Layer>
 		</Layers>
 		<Frames>
-			<Cooldown parentKey="Cooldown" inherits="CooldownFrameTemplate" hideCountdownNumbers="true" reverse="true" drawEdge="true" hidden="true">
+			<!-- Blizzard's XML says drawEdge="true", but CooldownFrame_Set turns the edge off every time it sets a cooldown. -->
+			<Cooldown parentKey="Cooldown" inherits="CooldownFrameTemplate" hideCountdownNumbers="true" reverse="true" drawEdge="false" hidden="true">
 				<Anchors>
 					<Anchor point="CENTER" x="0" y="-1"/>
 				</Anchors>
@@ -173,26 +181,7 @@
 				</Layers>
 				<BarTexture atlas="UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Mana"/>
 			</StatusBar>
-			<Frame parentKey="Debuff1" inherits="SimplePetTargetDebuffTemplate" id="1">
-				<Anchors>
-					<Anchor point="TOPLEFT" relativePoint="TOPRIGHT" x="4" y="-10"/>
-				</Anchors>
-			</Frame>
-			<Frame parentKey="Debuff2" inherits="SimplePetTargetDebuffTemplate" id="2">
-				<Anchors>
-					<Anchor point="LEFT" relativeKey="$parent.Debuff1" relativePoint="RIGHT" x="1" y="0"/>
-				</Anchors>
-			</Frame>
-			<Frame parentKey="Debuff3" inherits="SimplePetTargetDebuffTemplate" id="3">
-				<Anchors>
-					<Anchor point="TOPLEFT" relativeKey="$parent.Debuff1" relativePoint="BOTTOMLEFT" x="0" y="-1"/>
-				</Anchors>
-			</Frame>
-			<Frame parentKey="Debuff4" inherits="SimplePetTargetDebuffTemplate" id="4">
-				<Anchors>
-					<Anchor point="LEFT" relativeKey="$parent.Debuff3" relativePoint="RIGHT" x="1" y="0"/>
-				</Anchors>
-			</Frame>
+			<!-- Debuffs: SimplePetTarget.lua adds a CustomAuraContainerTemplate container at TOPRIGHT (4, -10), where Debuff1 was. -->
 		</Frames>
 	</Button>
 </Ui>

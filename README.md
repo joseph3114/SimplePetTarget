@@ -2,12 +2,10 @@
 
 A World of Warcraft Forever addon that adds a **Pet Target Frame**: a small frame showing whatever your pet is targeting. It looks and behaves like Blizzard's own Target of Target frame.
 
-> **Note:** debuffs show out of combat only for now. The game blocks addons from reading auras in combat; showing them through Blizzard's secure aura display is planned.
-
 ## Features
 
 - Same design as the default Target of Target frame: round portrait, name, health bar and power bar
-- Up to 4 debuffs with cooldown swipes and dispel-type borders; hover a debuff for its tooltip
+- Up to 4 debuffs with cooldown swipes and dispel-type borders, in combat too: they're shown through Blizzard's secure aura display, since the game doesn't let addons read auras in combat. Hover a debuff for its tooltip
 - Shows DEAD or UNCONSCIOUS like the default frame
 - Left-click to target your pet's target; click-casting and pings work on it too
 - Appears automatically whenever your pet has a target, including in combat

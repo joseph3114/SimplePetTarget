@@ -34,12 +34,7 @@ local DEFAULT_SETTINGS = {
 	-- point, x, y: the detached position, with offsets in UIParent units at 100% size.
 }
 
--- Starting point for the dispel type IDs that C_UnitAuras.GetAuraDispelTypeColor uses as curve
--- input. They aren't documented, so the real IDs are learned out of combat (LearnDispelTypeID).
-local KNOWN_DISPEL_TYPE_IDS = { Magic = 1, Curse = 2, Disease = 3, Poison = 4 }
-
 local issecretvalue = issecretvalue or function() return false end
-local canaccesstable = canaccesstable or function() return true end
 
 local db -- SimplePetTargetDB, available from ADDON_LOADED
 local previewing = false -- Edit Mode is open and shows the frame, with a stand-in unit (Lua state only)
@@ -60,7 +55,6 @@ frame.PortraitRed:SetVertexColor(1, 0, 0)
 
 local FRAME_WIDTH, FRAME_HEIGHT = frame:GetSize()
 local MANA_BAR_HEIGHT = frame.ManaBar:GetHeight()
-local debuffs = { frame.Debuff1, frame.Debuff2, frame.Debuff3, frame.Debuff4 }
 
 -- Report each distinct error once instead of every frame.
 local reportedErrors = {}
@@ -596,159 +590,149 @@ end
 -- Debuffs (AuraUtil.RefreshAuras for the Target of Target)
 ---------------------------------------------------------------------------------------------------
 
-local dispelColorCurve, dispelProbeCurve
+-- The aura APIs raise Lua errors when addon code calls them while auras are secret (combat,
+-- encounters, Mythic+, PvP matches). Blizzard's secure aura container reads the auras itself and
+-- shows them in buttons made from SimplePetTargetDebuffTemplate. Addon code may not touch those
+-- buttons while auras are secret, so they are set up once, when the container makes them, and
+-- afterwards only their tooltip side changes, and only while auras aren't secret. Never reach them
+-- any other way, for example through GetChildren.
 
-local function BuildDispelColorCurve()
-	local colorsByID = {}
-	for name, id in pairs(KNOWN_DISPEL_TYPE_IDS) do
-		colorsByID[id] = AuraUtil.GetAuraBorderColor(name)
-	end
-	for name, id in pairs(db and db.dispelTypeIDs or {}) do
-		colorsByID[id] = AuraUtil.GetAuraBorderColor(name)
-	end
-	local ids = {}
-	for id in pairs(colorsByID) do
-		table.insert(ids, id)
-	end
-	table.sort(ids)
+local DEBUFF_GROUP = "debuffs"
+local DEBUFF_SIZE, DEBUFF_SPACING = 12, 1
+local DEBUFF_X, DEBUFF_Y = 4, -10 -- Debuff1's offset from the frame's TOPRIGHT
 
-	local noneColor = AuraUtil.GetAuraBorderColor(nil)
-	dispelColorCurve = C_CurveUtil.CreateColorCurve()
-	dispelColorCurve:SetType(Enum.LuaCurveType.Step)
-	dispelColorCurve:AddPoint(0, noneColor)
-	for _, id in ipairs(ids) do
-		dispelColorCurve:AddPoint(id, colorsByID[id])
-		if not colorsByID[id + 1] then
-			dispelColorCurve:AddPoint(id + 1, noneColor) -- unlisted types get the default color
-		end
+local ShouldAurasBeSecret = C_Secrets and C_Secrets.ShouldAurasBeSecret or function() return false end
+
+local debuffContainer -- nil if it couldn't be set up; the rest of the frame works without it
+local debuffButtons = {} -- every button the container has made and this file has set up
+local debuffFilter = "HARMFUL"
+local debuffSortMethod -- set with the container
+local debuffTooltipAnchor = "ANCHOR_RIGHT"
+
+-- The container calls this for each button it makes, before it locks the button.
+local function InitializeDebuffButton(button)
+	button:SetIcon(button.Icon)
+	-- PreserveAsset keeps the overlay texture and colors it with AuraUtil.SetAuraBorderColor, as
+	-- RefreshDebuffs does. Without showWithoutDispelType, debuffs that have no dispel type would get
+	-- no border, where Blizzard gives them DEBUFF_TYPE_NONE_COLOR.
+	button:AddDispelTypeTexture(button.Border, {
+		style = Enum.CustomAuraButtonDispelTypeTextureStyle.PreserveAsset,
+		showWithoutDispelType = true,
+	})
+	-- Reverse swipe, no edge and no countdown numbers come from the template.
+	button:SetDurationCooldown(button.Cooldown)
+	button:SetTooltipAnchorPoint(debuffTooltipAnchor, 0, 0)
+	-- Count the button only if the container really took all three, whether or not a call that
+	-- failed above passed its error on to here.
+	if button:GetIcon() and button:GetDurationCooldown() and button:GetDispelTypeTextureCount() == 1 then
+		table.insert(debuffButtons, button)
 	end
 end
 
--- Out of combat the dispel type name is readable, so ask the game which curve input it uses: a
--- linear red ramp turns the ID into the red channel. The result is saved for use in combat.
-local function LearnDispelTypeID(unit, aura)
-	local name, auraInstanceID = aura.dispelName, aura.auraInstanceID
-	if not db or issecretvalue(name) or issecretvalue(auraInstanceID) or not name or not auraInstanceID or db.dispelTypeIDs[name] then
-		return
+local function CreateDebuffContainer()
+	-- RegisterUnitEvent takes its unit tokens from a fixed list that has no "pettarget", and the
+	-- container registers UNIT_AURA for its unit every time it is shown, out of reach of pcall. If
+	-- that raises an error, find out now and do without debuffs.
+	local probe = CreateFrame("Frame")
+	probe:RegisterUnitEvent("UNIT_AURA", UNIT)
+	probe:UnregisterAllEvents()
+
+	debuffSortMethod = AuraContainerSortMethod.AuraInstanceIDOnly
+	local container = CreateFrame("AuraContainer", nil, frame, "CustomAuraContainerTemplate")
+	container:Hide() -- until it is set up, so that a failure below leaves it hidden
+	container:SetPoint("TOPLEFT", frame, "TOPRIGHT", DEBUFF_X, DEBUFF_Y)
+	container:SetUnit(UNIT)
+	-- Edit Mode shows Blizzard's sample debuffs, like the Target of Target, read by the container's
+	-- own secure code. Addon code must never build those samples itself (AuraUtil.ForEachAura in Edit
+	-- Mode): AuraUtil builds them on first use, and built from addon code they taint the Blizzard code
+	-- that reads them later. Edit Mode's own setup reads them (party frames) before it refreshes the
+	-- Cooldown Manager and Damage Meter, which then failed with "tainted by SimplePetTarget" errors.
+	container:SetEditModePreviewEnabled(true)
+	-- A row holds two icons and the gap between them, so the third icon starts a second row.
+	container:SetFlowLayoutMaximumLineSize(2 * DEBUFF_SIZE + DEBUFF_SPACING)
+	container:AddAuraGroup(DEBUFF_GROUP, debuffFilter, {
+		templateNames = { "SimplePetTargetDebuffTemplate" },
+		initializeFrame = InitializeDebuffButton,
+		maxFrameCount = NUM_DEBUFFS,
+		sortMethod = debuffSortMethod,
+		layout = {
+			elementSpacing = DEBUFF_SPACING,
+			lineSpacing = DEBUFF_SPACING,
+			elementWidth = DEBUFF_SIZE,
+			elementHeight = DEBUFF_SIZE,
+		},
+	})
+	-- The container calls InitializeDebuffButton behind a secure call barrier, which reports errors
+	-- instead of passing them on, and AddAuraGroup makes its first buttons before it registers the
+	-- group. So check that the group exists and that every button it made was set up.
+	local frameCount = container:GetAuraGroupFrameCount(DEBUFF_GROUP)
+	if frameCount == 0 or #debuffButtons ~= frameCount then
+		error("the debuff buttons could not be set up")
 	end
-	if not dispelProbeCurve then
-		dispelProbeCurve = C_CurveUtil.CreateColorCurve()
-		dispelProbeCurve:SetType(Enum.LuaCurveType.Linear)
-		dispelProbeCurve:AddPoint(0, CreateColor(0, 0, 0, 1))
-		dispelProbeCurve:AddPoint(255, CreateColor(1, 0, 0, 1))
-	end
-	local ok, color = pcall(C_UnitAuras.GetAuraDispelTypeColor, unit, auraInstanceID, dispelProbeCurve)
-	if ok and color and not issecretvalue(color) and canaccesstable(color) and not issecretvalue(color.r) then
-		db.dispelTypeIDs[name] = math.floor(color.r * 255 + 0.5)
-		dispelColorCurve = nil -- rebuild with the learned ID
-	end
+	container:Show()
+	return container
 end
 
--- AuraUtil.SetAuraBorderColor, with a curve when the dispel type name is secret.
-local function SetBorderColor(border, unit, aura)
-	local dispelName = aura.dispelName
-	if not issecretvalue(dispelName) then
-		AuraUtil.SetAuraBorderColor(border, dispelName)
-		return
-	end
-	local auraInstanceID = aura.auraInstanceID
-	if not issecretvalue(auraInstanceID) then
-		if not dispelColorCurve then
-			BuildDispelColorCurve()
-		end
-		local ok, color = pcall(C_UnitAuras.GetAuraDispelTypeColor, unit, auraInstanceID, dispelColorCurve)
-		if ok and color and not issecretvalue(color) and canaccesstable(color) then
-			border:SetVertexColor(color.r, color.g, color.b, color.a)
-			return
-		end
-	end
-	AuraUtil.SetAuraBorderColor(border, nil)
-end
-
--- CooldownFrame_Set(cooldown, expirationTime - duration, duration, true), or a duration object
--- when the times are secret (the only way addons can show a secret cooldown).
-local function SetDebuffCooldown(cooldown, unit, aura)
-	local duration, expirationTime = aura.duration, aura.expirationTime
-	if not issecretvalue(duration) and not issecretvalue(expirationTime) then
-		CooldownFrame_Set(cooldown, expirationTime - duration, duration, true)
-		return
-	end
-	local auraInstanceID = aura.auraInstanceID
-	local durationObject = not issecretvalue(auraInstanceID) and C_UnitAuras.GetAuraDuration(unit, auraInstanceID)
-	if durationObject then
-		cooldown:SetDrawEdge(false)
-		cooldown:SetCooldownFromDurationObject(durationObject, true)
+do
+	local ok, result = pcall(CreateDebuffContainer)
+	if ok then
+		debuffContainer = result
 	else
-		cooldown:Clear()
+		geterrorhandler()(addonName .. ": debuffs are unavailable: " .. tostring(result))
 	end
 end
 
-local function ShowDebuff(button, unit, aura, auraIndex, tooltipFilter)
-	button.unit, button.auraIndex, button.tooltipFilter = unit, auraIndex, tooltipFilter
-	button.Icon:SetTexture(aura.icon)
-	SetBorderColor(button.Border, unit, aura)
-	SetDebuffCooldown(button.Cooldown, unit, aura)
-	button:Show()
+-- AuraUtil.RefreshAuras' filter. On enemies Blizzard lists only the debuffs you cast
+-- (SHOW_CASTABLE_DEBUFFS is normally unset) by checking each one's caster, which is secret in
+-- combat. The PLAYER filter does that instead, but it also lets in your pet's and vehicle's
+-- debuffs. DefaultAuraCompare sorts debuffs cast by "player" first (then by priority, by whether
+-- you can apply them and by the order they were applied in), so those only take slots your own
+-- debuffs leave free. Elsewhere Blizzard lists debuffs in aura slot order, which no sort method
+-- offers; the order they were applied in is the closest.
+local function GetDebuffFilter(unit)
+	local filter = (GetCVarBool("showDispelDebuffs") and UnitCanAssist("player", unit)) and "HARMFUL|RAID" or "HARMFUL"
+	if UnitCanAttack("player", unit) and SHOW_CASTABLE_DEBUFFS ~= "0" then
+		return filter .. "|PLAYER", AuraContainerSortMethod.Default
+	end
+	return filter, AuraContainerSortMethod.AuraInstanceIDOnly
+end
+
+-- The Target of Target opens a debuff's tooltip on its left when the icon's centre is right of the
+-- screen's centre. A container button has one anchor, which can only change while auras aren't
+-- secret, so all of them follow the first icon. Its centre comes from the frame, because the
+-- buttons' own positions are secret; like Blizzard, it is compared in the icon's units.
+local function UpdateDebuffTooltipAnchor()
+	local right = frame:GetRight()
+	if not right or issecretvalue(right) then
+		return
+	end
+	local anchor = right + DEBUFF_X + DEBUFF_SIZE / 2 > GetScreenWidth() / 2 and "ANCHOR_LEFT" or "ANCHOR_RIGHT"
+	if anchor == debuffTooltipAnchor or ShouldAurasBeSecret() then
+		return
+	end
+	for _, button in ipairs(debuffButtons) do
+		button:SetTooltipAnchorPoint(anchor, 0, 0)
+	end
+	debuffTooltipAnchor = anchor
 end
 
 local function UpdateDebuffs(unit)
-	local showDispellable = GetCVarBool("showDispelDebuffs") and UnitCanAssist("player", unit)
-	local filter = showDispellable and "HARMFUL|RAID" or "HARMFUL"
-	local tooltipFilter = showDispellable and "RAID" or nil
-	-- On enemies Blizzard only shows your own debuffs (SHOW_CASTABLE_DEBUFFS is normally unset). It
-	-- checks each debuff's caster, which is secret in combat, so ask for them with a filter instead.
-	if UnitCanAttack("player", unit) and SHOW_CASTABLE_DEBUFFS ~= "0" then
-		filter = filter .. "|PLAYER"
-		tooltipFilter = tooltipFilter and tooltipFilter .. "|PLAYER" or "PLAYER"
+	if not debuffContainer then
+		return
 	end
-
-	-- Addons get a Lua error from the aura APIs while auras are secret (combat and similar), so the
-	-- debuffs stay hidden then. Interim until the secure aura container takes over.
-	--
-	-- In Edit Mode the stand-in shows its real debuffs, not Blizzard's sample ones. AuraUtil builds
-	-- the samples on first use, and built from addon code they taint any Blizzard code that reads
-	-- them later: Edit Mode's own setup reads them (party frames) before it refreshes the Cooldown
-	-- Manager and Damage Meter, which then failed with "tainted by SimplePetTarget" errors.
-	local numShown = 0
-	if not C_Secrets.ShouldAurasBeSecret() then
-		local index = 1
-		while numShown < NUM_DEBUFFS do
-			local aura = C_UnitAuras.GetAuraDataByIndex(unit, index, filter)
-			if not aura then
-				break
-			end
-			if aura.icon then
-				numShown = numShown + 1
-				LearnDispelTypeID(unit, aura)
-				ShowDebuff(debuffs[numShown], unit, aura, index, tooltipFilter)
-			end
-			index = index + 1
-		end
+	local filter, sortMethod = GetDebuffFilter(unit)
+	if filter ~= debuffFilter then
+		debuffContainer:SetAuraGroupFilterString(DEBUFF_GROUP, filter)
+		debuffFilter = filter
 	end
-	for i = numShown + 1, NUM_DEBUFFS do
-		debuffs[i]:Hide()
+	if sortMethod ~= debuffSortMethod then
+		debuffContainer:SetAuraGroupSortMethod(DEBUFF_GROUP, sortMethod, AuraContainerSortDirection.Normal)
+		debuffSortMethod = sortMethod
 	end
-end
-
-local function Debuff_OnEnter(self)
-	local x = self:GetCenter()
-	if x and not issecretvalue(x) and x > GetScreenWidth() / 2 then
-		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-	else
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-	end
-	-- Blizzard passes the button's ID as the debuff index, which points at the wrong debuff when
-	-- only your own are listed. The index we listed it under always matches the icon.
-	GameTooltip:SetUnitDebuff(self.unit, self.auraIndex, self.tooltipFilter)
-end
-
-local function Debuff_OnLeave()
-	GameTooltip:Hide()
-end
-
-for _, button in ipairs(debuffs) do
-	button:SetScript("OnEnter", Debuff_OnEnter)
-	button:SetScript("OnLeave", Debuff_OnLeave)
+	-- The container probably gets no UNIT_AURA events for "pettarget", so have it read the auras
+	-- again. This only marks it dirty; it rebuilds once, on its own next OnUpdate.
+	debuffContainer:UpdateAllAuras()
+	UpdateDebuffTooltipAnchor()
 end
 
 ---------------------------------------------------------------------------------------------------
@@ -1046,7 +1030,7 @@ local function OnAddonLoaded()
 	SimplePetTargetDB = SimplePetTargetDB or {}
 	db = SimplePetTargetDB
 	db.layouts = db.layouts or {}
-	db.dispelTypeIDs = db.dispelTypeIDs or {}
+	db.dispelTypeIDs = nil -- learned by older versions; the aura container needs none
 	-- The first beta turned the frame on and off per layout; that is account-wide (db.enabled) now.
 	for _, settings in pairs(db.layouts) do
 		settings.enabled = nil

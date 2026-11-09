@@ -1,0 +1,198 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+	<!--
+		A copy of Blizzard's Target of Target frame (TargetofTargetFrameTemplate and
+		TargetofTargetDebuffFrameTemplate in Blizzard_UnitFrame/Mainline/TargetFrame.xml), with the
+		WoW Forever (camelot) layout changes from Camelot/TargetFrame.lua baked in. The scripts are
+		set from SimplePetTarget.lua instead, because Blizzard's own scripts read health values that
+		the game hides from addons in combat.
+	-->
+
+	<Frame name="SimplePetTargetDebuffTemplate" virtual="true" enableMouse="true" hidden="true">
+		<Size x="12" y="12"/>
+		<Layers>
+			<Layer level="ARTWORK">
+				<Texture parentKey="Icon" setAllPoints="true"/>
+			</Layer>
+			<Layer level="OVERLAY">
+				<Texture parentKey="Border" file="Interface\Buttons\UI-Debuff-Overlays">
+					<Size x="13" y="13"/>
+					<Anchors>
+						<Anchor point="TOPLEFT" x="-1" y="1"/>
+						<Anchor point="BOTTOMRIGHT" x="1" y="-1"/>
+					</Anchors>
+					<TexCoords left="0.296875" right="0.5703125" top="0" bottom="0.515625"/>
+				</Texture>
+			</Layer>
+		</Layers>
+		<Frames>
+			<Cooldown parentKey="Cooldown" inherits="CooldownFrameTemplate" hideCountdownNumbers="true" reverse="true" drawEdge="true" hidden="true">
+				<Anchors>
+					<Anchor point="CENTER" x="0" y="-1"/>
+				</Anchors>
+			</Cooldown>
+		</Frames>
+	</Frame>
+
+	<Button name="SimplePetTargetFrameTemplate" virtual="true" frameStrata="LOW" hidden="true" roleset="unitFrames" inherits="SecureUnitButtonTemplate, PingableUnitFrameTemplate">
+		<Size x="120" y="49"/>
+		<Layers>
+			<Layer level="BACKGROUND" textureSubLevel="1">
+				<Texture parentKey="Portrait">
+					<Size x="37" y="37"/>
+					<Anchors>
+						<Anchor point="TOPLEFT" x="5" y="-5"/>
+					</Anchors>
+				</Texture>
+				<!--
+					A red copy of the portrait for Blizzard's low-health tint. The health percentage is
+					hidden from addons, so the two copies trade opacity through curves the game evaluates
+					instead of the Lua code picking a color.
+				-->
+				<Texture parentKey="PortraitRed" alpha="0">
+					<Size x="37" y="37"/>
+					<Anchors>
+						<Anchor point="TOPLEFT" x="5" y="-5"/>
+					</Anchors>
+				</Texture>
+				<MaskTexture parentKey="PortraitMask" atlas="CircleMask" hWrapMode="CLAMPTOBLACKADDITIVE" vWrapMode="CLAMPTOBLACKADDITIVE">
+					<MaskedTextures>
+						<MaskedTexture childKey="Portrait"/>
+						<MaskedTexture childKey="PortraitRed"/>
+					</MaskedTextures>
+					<Anchors>
+						<Anchor point="TOPLEFT" relativeKey="$parent.Portrait"/>
+						<Anchor point="BOTTOMRIGHT" relativeKey="$parent.Portrait"/>
+					</Anchors>
+				</MaskTexture>
+			</Layer>
+			<Layer level="BACKGROUND" textureSubLevel="2">
+				<Texture parentKey="FrameTexture" atlas="UI-HUD-UnitFrame-TargetofTarget-PortraitOn" useAtlasSize="true">
+					<Anchors>
+						<Anchor point="CENTER"/>
+					</Anchors>
+				</Texture>
+			</Layer>
+			<Layer level="OVERLAY">
+				<FontString parentKey="Name" inherits="GameFontNormalSmall" justifyH="CENTER">
+					<Size x="68" y="10"/>
+					<Anchors>
+						<Anchor point="TOPLEFT" relativeKey="$parent.Portrait" relativePoint="TOPRIGHT" x="2" y="-1"/>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Frames>
+			<StatusBar parentKey="HealthBar">
+				<Size x="70" y="11"/>
+				<Anchors>
+					<Anchor point="BOTTOMRIGHT" relativePoint="RIGHT" x="-5" y="-4"/>
+				</Anchors>
+				<Layers>
+					<Layer level="ARTWORK">
+						<FontString parentKey="DeadText" inherits="GameFontNormalSmall" justifyH="CENTER" justifyV="MIDDLE" text="DEAD" hidden="true">
+							<Anchors>
+								<Anchor point="CENTER"/>
+							</Anchors>
+						</FontString>
+						<FontString parentKey="UnconsciousText" inherits="GameFontNormalSmall" justifyH="CENTER" justifyV="MIDDLE" text="UNCONSCIOUS" hidden="true">
+							<Anchors>
+								<Anchor point="CENTER"/>
+							</Anchors>
+						</FontString>
+					</Layer>
+					<Layer level="OVERLAY">
+						<!-- Blizzard uses the party mask assets here on purpose. -->
+						<MaskTexture parentKey="HealthBarMask" atlas="UI-HUD-UnitFrame-Party-PortraitOn-Bar-Health-Mask" useAtlasSize="true" hWrapMode="CLAMPTOBLACKADDITIVE" vWrapMode="CLAMPTOBLACKADDITIVE">
+							<Anchors>
+								<Anchor point="TOPLEFT" x="-28" y="3"/>
+							</Anchors>
+						</MaskTexture>
+					</Layer>
+					<!--
+						Status text, which the Target of Target doesn't have. Laid out like the Pet Frame's
+						bars (Blizzard_UnitFrame/Mainline/PetFrame.xml), which use the same art.
+					-->
+					<Layer level="OVERLAY" textureSubLevel="1">
+						<FontString parentKey="TextString" inherits="TextStatusBarText" hidden="true">
+							<Anchors>
+								<Anchor point="CENTER" x="0" y="0"/>
+							</Anchors>
+						</FontString>
+						<FontString parentKey="LeftText" inherits="TextStatusBarText" hidden="true">
+							<Anchors>
+								<Anchor point="LEFT" x="0" y="0"/>
+							</Anchors>
+						</FontString>
+						<FontString parentKey="RightText" inherits="TextStatusBarText" hidden="true">
+							<Anchors>
+								<Anchor point="RIGHT" x="0" y="0"/>
+							</Anchors>
+						</FontString>
+					</Layer>
+				</Layers>
+				<BarTexture atlas="UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Health"/>
+			</StatusBar>
+			<StatusBar parentKey="ManaBar">
+				<Size x="78" y="7"/>
+				<Anchors>
+					<Anchor point="TOPLEFT" relativeKey="$parent.HealthBar" relativePoint="BOTTOMLEFT" x="-3" y="-1"/>
+				</Anchors>
+				<Layers>
+					<Layer level="OVERLAY" textureSubLevel="1">
+						<Texture parentKey="Spark" alphaMode="ADD" texelSnappingBias="0.0" snapToPixelGrid="false" hidden="true">
+							<Anchors>
+								<Anchor point="RIGHT"/>
+							</Anchors>
+						</Texture>
+						<FontString parentKey="TextString" inherits="TextStatusBarText" hidden="true">
+							<Anchors>
+								<Anchor point="CENTER" x="2" y="0"/>
+							</Anchors>
+						</FontString>
+						<FontString parentKey="LeftText" inherits="TextStatusBarText" hidden="true">
+							<Anchors>
+								<Anchor point="LEFT" x="4" y="0"/>
+							</Anchors>
+						</FontString>
+						<FontString parentKey="RightText" inherits="TextStatusBarText" hidden="true">
+							<Anchors>
+								<Anchor point="RIGHT" x="0" y="0"/>
+							</Anchors>
+						</FontString>
+					</Layer>
+					<Layer level="OVERLAY" textureSubLevel="2">
+						<MaskTexture parentKey="ManaBarMask" atlas="UI-HUD-UnitFrame-Party-PortraitOn-Bar-Mana-Mask" useAtlasSize="true" hWrapMode="CLAMPTOBLACKADDITIVE" vWrapMode="CLAMPTOBLACKADDITIVE" texelSnappingBias="0.0" snapToPixelGrid="false">
+							<Anchors>
+								<Anchor point="TOPLEFT" x="-27" y="4"/>
+							</Anchors>
+							<MaskedTextures>
+								<MaskedTexture childKey="Spark"/>
+							</MaskedTextures>
+						</MaskTexture>
+					</Layer>
+				</Layers>
+				<BarTexture atlas="UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Mana"/>
+			</StatusBar>
+			<Frame parentKey="Debuff1" inherits="SimplePetTargetDebuffTemplate" id="1">
+				<Anchors>
+					<Anchor point="TOPLEFT" relativePoint="TOPRIGHT" x="4" y="-10"/>
+				</Anchors>
+			</Frame>
+			<Frame parentKey="Debuff2" inherits="SimplePetTargetDebuffTemplate" id="2">
+				<Anchors>
+					<Anchor point="LEFT" relativeKey="$parent.Debuff1" relativePoint="RIGHT" x="1" y="0"/>
+				</Anchors>
+			</Frame>
+			<Frame parentKey="Debuff3" inherits="SimplePetTargetDebuffTemplate" id="3">
+				<Anchors>
+					<Anchor point="TOPLEFT" relativeKey="$parent.Debuff1" relativePoint="BOTTOMLEFT" x="0" y="-1"/>
+				</Anchors>
+			</Frame>
+			<Frame parentKey="Debuff4" inherits="SimplePetTargetDebuffTemplate" id="4">
+				<Anchors>
+					<Anchor point="LEFT" relativeKey="$parent.Debuff3" relativePoint="RIGHT" x="1" y="0"/>
+				</Anchors>
+			</Frame>
+		</Frames>
+	</Button>
+</Ui>

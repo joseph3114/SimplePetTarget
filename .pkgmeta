@@ -1,0 +1,5 @@
+package-as: SimplePetTarget
+
+ignore:
+  - assets
+  - README.md

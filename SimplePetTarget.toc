@@ -1,0 +1,16 @@
+## Interface: 16001
+## Title: Simple Pet Target
+## Notes: Shows your pet's target in a frame that looks and works like Blizzard's Target of Target, with Edit Mode support.
+## Author: joseph3114
+## Version: @project-version@
+## Category: Unit Frames
+## IconTexture: Interface\Icons\Ability_Hunter_BeastCall
+## SavedVariables: SimplePetTargetDB
+## X-Curse-Project-ID: 1794445
+## X-License: MIT
+
+Libs\LibEditMode\namespaced.lua
+Libs\LibEditMode\embed.xml
+
+SimplePetTarget.xml
+SimplePetTarget.lua

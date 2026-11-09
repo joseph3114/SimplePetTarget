@@ -26,8 +26,9 @@ local ATTACH_POINT, ATTACH_RELATIVE_POINT, ATTACH_X, ATTACH_Y = "TOPLEFT", "TOPR
 -- The range of Blizzard's Frame Size slider for unit frames.
 local FRAME_SIZE_MIN, FRAME_SIZE_MAX, FRAME_SIZE_STEP = 100, 200, 5
 
+-- Per Edit Mode layout. Whether the frame is used at all, and whether Edit Mode shows it, are
+-- account-wide (db.enabled and db.showInEditMode), like Blizzard's own options.
 local DEFAULT_SETTINGS = {
-	enabled = true,
 	attached = true,
 	frameSize = 100,
 	-- point, x, y: the detached position, with offsets in UIParent units at 100% size.
@@ -41,9 +42,11 @@ local issecretvalue = issecretvalue or function() return false end
 local canaccesstable = canaccesstable or function() return true end
 
 local db -- SimplePetTargetDB, available from ADDON_LOADED
-local previewing = false -- Edit Mode is open: show a stand-in and sample debuffs (Lua state only)
+local previewing = false -- Edit Mode is open and shows the frame, with a stand-in unit (Lua state only)
 local previewShown = false -- shown for Edit Mode with the state driver off (protected, so may lag in combat)
 local pendingLayout = false -- protected changes waiting for combat to end
+local appliedEnabled = true -- IsEnabled() as last applied out of combat; the frame follows this one
+local checkedForSession = false -- the Edit Mode checkbox is on for this Edit Mode session only
 
 local frame = CreateFrame("Button", "SimplePetTargetFrame", UIParent, "SimplePetTargetFrameTemplate")
 frame.unit = UNIT -- read by PingableType_UnitFrameMixin
@@ -90,6 +93,37 @@ end
 
 local function GetActiveSettings()
 	return GetSettings(LEM:GetActiveLayoutName())
+end
+
+-- "Show Pet Target Frame" in Options > AddOns > Simple Pet Target, like Blizzard's Target of Target
+-- option.
+local function IsEnabled()
+	return not db or db.enabled ~= false
+end
+
+-- The "Pet Target Frame" checkbox beside the HUD Edit Mode window, like Blizzard's "Pet Frame"
+-- checkbox in that window, including its checking itself for the session when the frame is already
+-- showing (OnEditModeEnter).
+local function IsEditModeChecked()
+	return checkedForSession or not db or db.showInEditMode ~= false
+end
+
+-- Whether Edit Mode shows the frame so it can be placed. A frame that is turned off doesn't show
+-- there, like the Target of Target.
+local function ShowsInEditMode()
+	return IsEnabled() and IsEditModeChecked()
+end
+
+-- LibEditMode keeps its settings dialog bound to the frame after Edit Mode closes, and a later
+-- layout change can show it again outside Edit Mode, where its position panel takes keyboard input.
+-- Its position edit box also moves the frame without checking for combat. Clearing the dialog the
+-- way its close button does avoids both.
+local function ResetEditModeDialog()
+	local dialog = LEM.internal and LEM.internal.dialog
+	if dialog then
+		dialog:Hide()
+		dialog:Reset()
+	end
 end
 
 ---------------------------------------------------------------------------------------------------
@@ -188,17 +222,11 @@ end
 
 -- Alpha may change in combat, so it covers what the protected visibility can't do right away: the
 -- state driver re-checks only every 0.2 s, and a frame Edit Mode showed stays shown until combat
--- ends. In Edit Mode a disabled frame is dimmed instead, because a hidden one couldn't be selected
--- to turn it back on.
+-- ends. Turning the frame off waits for combat to end like the rest (appliedEnabled): fading it
+-- out early would leave an invisible button that still targets the pet's target when clicked.
 local function UpdateAlpha()
-	local enabled = GetActiveSettings().enabled
-	local alpha
-	if previewing then
-		alpha = enabled and 1 or 0.5
-	else
-		alpha = (enabled and UnitExists(UNIT) and not UnitIsDead("pet")) and 1 or 0
-	end
-	frame:SetAlpha(alpha)
+	local shown = previewing or (appliedEnabled and UnitExists(UNIT) and not UnitIsDead("pet"))
+	frame:SetAlpha(shown and 1 or 0)
 end
 
 -- Out of combat, follow the pet's target at once instead of waiting for the state driver.
@@ -206,14 +234,37 @@ local function SyncVisibility()
 	if InCombatLockdown() or previewShown then
 		return
 	end
-	frame:SetShown(GetActiveSettings().enabled and UnitExists(UNIT) and not UnitIsDead("pet"))
+	frame:SetShown(appliedEnabled and UnitExists(UNIT) and not UnitIsDead("pet"))
+end
+
+-- Like Blizzard's Edit Mode systems, the frame can be selected only while Edit Mode shows it. The
+-- selection overlay isn't protected, so this works in combat too.
+local function UpdateSelection()
+	local selection = LEM.frameSelections[frame]
+	if not selection or not LEM:IsInEditMode() then
+		return -- LibEditMode shows and hides it with Edit Mode
+	end
+	if previewing then
+		if not selection:IsShown() then
+			selection:ShowHighlighted()
+		end
+	else
+		-- LibEditMode can leave its dialog bound to the frame without the frame being selected (when
+		-- another addon's LibEditMode frame is clicked), and then shows it again on a layout change.
+		local dialog = LEM.internal and LEM.internal.dialog
+		if selection.isSelected or (dialog and dialog.selection == selection) then
+			ResetEditModeDialog() -- closes and unbinds the settings dialog
+		end
+		selection:Hide()
+	end
 end
 
 -- Edit Mode can open and close in combat. The Lua side follows at once; showing the frame and
 -- swapping its state driver are protected, so ApplyLayout does that when combat allows.
 local function UpdatePreviewState()
-	previewing = LEM:IsInEditMode()
+	previewing = LEM:IsInEditMode() and ShowsInEditMode()
 	UpdateAlpha()
+	UpdateSelection()
 end
 
 local function UpdatePreviewShown()
@@ -229,11 +280,14 @@ end
 
 local function UpdateVisibility()
 	if not previewShown then
-		RegisterStateDriver(frame, "visibility", GetActiveSettings().enabled and VISIBILITY_DRIVER or "hide")
+		RegisterStateDriver(frame, "visibility", appliedEnabled and VISIBILITY_DRIVER or "hide")
 	end
 end
 
 local function ApplyLayout()
+	if not InCombatLockdown() then
+		appliedEnabled = IsEnabled()
+	end
 	UpdatePreviewState()
 	if InCombatLockdown() then
 		pendingLayout = true
@@ -427,6 +481,23 @@ end
 
 local hovered = false -- with Status Text off, Blizzard shows the text while you point at the bar
 
+-- Blizzard leaves out the text of a bar whose maximum is 0, like the power bar of a unit without
+-- power (TextStatusBarMixin:UpdateTextStringWithValues). For a unit that isn't player-controlled
+-- that maximum is secret, so the game makes the decision: TruncateWhenZero turns it into "" when
+-- it is 0, and WrapString keeps the text only if that isn't empty. WrapString also puts the
+-- maximum's digits into the result, so they go in as the data of an empty hyperlink, which
+-- StripHyperlinks removes again (left in, the game draws it as text).
+local StringUtil = C_StringUtil
+local canHideSecretZeroMax = StringUtil and StringUtil.TruncateWhenZero and StringUtil.WrapString and StringUtil.StripHyperlinks
+
+local function HideIfMaxIsZero(text, maxValue)
+	if not issecretvalue(maxValue) or not canHideSecretZeroMax then
+		return text -- no maximum to check, or a readable one that the caller already checked
+	end
+	local gate = StringUtil.WrapString(StringUtil.TruncateWhenZero(maxValue), "|Hsimplepettarget:", "|h|h")
+	return StringUtil.StripHyperlinks(StringUtil.WrapString(gate, text))
+end
+
 local function GetPercent(unit, powerType)
 	if powerType then
 		return UnitPowerPercent(unit, powerType, false, CEIL_PERCENT_CURVE)
@@ -444,17 +515,21 @@ local function UpdateBarText(bar, unit, value, maxValue, hidden, powerType, powe
 		return
 	end
 
+	-- Only power is checked (HideIfMaxIsZero): a unit without power has a maximum of 0, while a unit
+	-- that exists has health. Blizzard's own check for 0 health is only a safety net.
+	local powerMax = powerType and maxValue
+
 	local displayMode = GetCVar("statusTextDisplay")
 	if displayMode == STATUS_TEXT_DISPLAY_MODE.BOTH then
 		-- Blizzard puts the percentage beside the value only for health and mana.
 		if not powerType or powerToken == "MANA" then
 			local percent = GetPercent(unit, powerType)
 			if percent then
-				bar.LeftText:SetText(percent .. "%")
+				bar.LeftText:SetText(HideIfMaxIsZero(percent .. "%", powerMax))
 				bar.LeftText:Show()
 			end
 		end
-		bar.RightText:SetText(AbbreviateLargeNumbers(value))
+		bar.RightText:SetText(HideIfMaxIsZero(AbbreviateLargeNumbers(value), powerMax))
 		bar.RightText:Show()
 		textString:Hide()
 		return
@@ -465,7 +540,8 @@ local function UpdateBarText(bar, unit, value, maxValue, hidden, powerType, powe
 		local percent = GetPercent(unit, powerType)
 		text = percent and percent .. "%"
 	end
-	textString:SetText(text or AbbreviateLargeNumbers(value) .. " / " .. AbbreviateLargeNumbers(maxValue))
+	text = text or AbbreviateLargeNumbers(value) .. " / " .. AbbreviateLargeNumbers(maxValue)
+	textString:SetText(HideIfMaxIsZero(text, powerMax))
 	textString:Show()
 end
 
@@ -626,20 +702,15 @@ local function UpdateDebuffs(unit)
 		tooltipFilter = tooltipFilter and tooltipFilter .. "|PLAYER" or "PLAYER"
 	end
 
+	-- Addons get a Lua error from the aura APIs while auras are secret (combat and similar), so the
+	-- debuffs stay hidden then. Interim until the secure aura container takes over.
+	--
+	-- In Edit Mode the stand-in shows its real debuffs, not Blizzard's sample ones. AuraUtil builds
+	-- the samples on first use, and built from addon code they taint any Blizzard code that reads
+	-- them later: Edit Mode's own setup reads them (party frames) before it refreshes the Cooldown
+	-- Manager and Damage Meter, which then failed with "tainted by SimplePetTarget" errors.
 	local numShown = 0
-	if previewing then
-		-- In Edit Mode AuraUtil returns Blizzard's sample debuffs, which a Target of Target shows too.
-		AuraUtil.ForEachAura(unit, filter, NUM_DEBUFFS, function(aura)
-			if aura.icon then
-				numShown = numShown + 1
-				ShowDebuff(debuffs[numShown], unit, aura, numShown, tooltipFilter)
-			end
-			return numShown >= NUM_DEBUFFS
-		end, true)
-	elseif C_Secrets.ShouldAurasBeSecret() then
-		-- Addons get a Lua error from the aura APIs while auras are secret (combat and similar), so
-		-- the debuffs stay hidden then. Interim until the secure aura container takes over.
-	else
+	if not C_Secrets.ShouldAurasBeSecret() then
 		local index = 1
 		while numShown < NUM_DEBUFFS do
 			local aura = C_UnitAuras.GetAuraDataByIndex(unit, index, filter)
@@ -722,18 +793,6 @@ end)
 -- Edit Mode
 ---------------------------------------------------------------------------------------------------
 
--- LibEditMode keeps its settings dialog bound to the frame after Edit Mode closes, and a later
--- layout change can show it again outside Edit Mode, where its position panel takes keyboard input.
--- Its position edit box also moves the frame without checking for combat. Clearing the dialog the
--- way its close button does avoids both.
-local function ResetEditModeDialog()
-	local dialog = LEM.internal and LEM.internal.dialog
-	if dialog then
-		dialog:Hide()
-		dialog:Reset()
-	end
-end
-
 local function OnPositionChanged(_, layoutName, point, x, y)
 	if not layoutName then
 		return
@@ -750,21 +809,9 @@ local function FormatFrameSize(value)
 	return FormatPercentage(value / 100, true)
 end
 
+-- The frame's own Edit Mode settings, per layout. Turning it on or off and showing it in Edit Mode
+-- are account-wide, so they live in Options and beside the HUD Edit Mode window instead.
 local SETTINGS = {
-	{
-		kind = LEM.SettingType.Checkbox,
-		name = "Show Pet Target Frame",
-		default = DEFAULT_SETTINGS.enabled,
-		get = function(layoutName)
-			return GetSettings(layoutName).enabled
-		end,
-		set = function(layoutName, value)
-			if layoutName then
-				GetSettings(layoutName).enabled = value
-				ApplyLayout()
-			end
-		end,
-	},
 	{
 		kind = LEM.SettingType.Checkbox,
 		name = "Attach to Pet Frame",
@@ -856,7 +903,135 @@ local function OnLayoutDeleted(layoutName)
 	db.layouts[layoutName] = nil
 end
 
+---------------------------------------------------------------------------------------------------
+-- Show/hide options: Options > AddOns, and a panel beside the HUD Edit Mode window
+---------------------------------------------------------------------------------------------------
+
+-- Blizzard's checkboxes for which frames Edit Mode shows live in the HUD Edit Mode window. Addons
+-- can't add to that window without tainting Edit Mode, so this small panel sits beside it instead,
+-- with the same checkbox. It only exists while Edit Mode is open.
+local EDIT_MODE_PANEL_PADDING = 15
+local EDIT_MODE_PANEL_GAP = 2
+
+local editModePanel = CreateFrame("Frame", nil, UIParent)
+editModePanel:Hide()
+editModePanel:SetFrameStrata("DIALOG")
+editModePanel:SetClampedToScreen(true)
+editModePanel:EnableMouse(true) -- clicks on the panel shouldn't reach the frames behind it
+editModePanel:SetPoint("TOPLEFT", EditModeManagerFrame, "TOPRIGHT", EDIT_MODE_PANEL_GAP, 0)
+
+local editModePanelBorder = CreateFrame("Frame", nil, editModePanel, "DialogBorderTranslucentTemplate")
+editModePanelBorder:SetAllPoints()
+
+local editModePanelTitle = editModePanel:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
+editModePanelTitle:SetPoint("TOP", 0, -EDIT_MODE_PANEL_PADDING)
+editModePanelTitle:SetText("Simple Pet Target")
+
+local editModeCheckbox = CreateFrame("Frame", nil, editModePanel, "EditModeManagerSettingCheckButtonTemplate")
+editModeCheckbox:ClearAllPoints()
+editModeCheckbox:SetPoint("TOPLEFT", EDIT_MODE_PANEL_PADDING, -(EDIT_MODE_PANEL_PADDING + 25))
+editModeCheckbox:SetLabelText(SYSTEM_NAME)
+-- Like Blizzard's checkboxes for frames whose option is off: greyed out, with a tooltip saying why.
+editModeCheckbox.disabledTooltipText = "Turn on Show Pet Target Frame in Options > AddOns > Simple Pet Target to place this frame."
+function editModeCheckbox:ShouldEnable()
+	return IsEnabled()
+end
+editModeCheckbox:SetCallback(function(checked, isUserInput)
+	if isUserInput and db then
+		checkedForSession = false
+		db.showInEditMode = checked
+		ApplyLayout()
+	end
+end)
+
+editModePanel:SetSize(editModeCheckbox:GetWidth() + EDIT_MODE_PANEL_PADDING * 2, EDIT_MODE_PANEL_PADDING * 2 + 25 + editModeCheckbox:GetHeight())
+
+-- Beside the Edit Mode window on whichever side has room: right, else left, below or above. The
+-- window can be dragged anywhere, and a panel clamped to the screen would slide underneath it.
+local panelPlacement
+local function PlaceEditModePanel()
+	local left, right = EditModeManagerFrame:GetLeft(), EditModeManagerFrame:GetRight()
+	local top, bottom = EditModeManagerFrame:GetTop(), EditModeManagerFrame:GetBottom()
+	if not left or not right or not top or not bottom or issecretvalue(left) or issecretvalue(right) or issecretvalue(top) or issecretvalue(bottom) then
+		return
+	end
+	local scale = EditModeManagerFrame:GetEffectiveScale() / UIParent:GetEffectiveScale()
+	left, right, top, bottom = left * scale, right * scale, top * scale, bottom * scale -- UIParent units
+	local width, height = editModePanel:GetSize()
+	local placement = "right"
+	if right + EDIT_MODE_PANEL_GAP + width > UIParent:GetRight() then
+		if left - EDIT_MODE_PANEL_GAP - width >= UIParent:GetLeft() then
+			placement = "left"
+		elseif bottom - EDIT_MODE_PANEL_GAP - height >= UIParent:GetBottom() then
+			placement = "below"
+		elseif top + EDIT_MODE_PANEL_GAP + height <= UIParent:GetTop() then
+			placement = "above"
+		end
+	end
+	if placement == panelPlacement then
+		return
+	end
+	panelPlacement = placement
+	editModePanel:ClearAllPoints()
+	if placement == "left" then
+		editModePanel:SetPoint("TOPRIGHT", EditModeManagerFrame, "TOPLEFT", -EDIT_MODE_PANEL_GAP, 0)
+	elseif placement == "below" then
+		editModePanel:SetPoint("TOP", EditModeManagerFrame, "BOTTOM", 0, -EDIT_MODE_PANEL_GAP)
+	elseif placement == "above" then
+		editModePanel:SetPoint("BOTTOM", EditModeManagerFrame, "TOP", 0, EDIT_MODE_PANEL_GAP)
+	else
+		editModePanel:SetPoint("TOPLEFT", EditModeManagerFrame, "TOPRIGHT", EDIT_MODE_PANEL_GAP, 0)
+	end
+end
+
+local petFrameVisible
+editModePanel:SetScript("OnShow", function()
+	panelPlacement = nil
+	PlaceEditModePanel()
+	petFrameVisible = PetFrame:IsVisible()
+	editModeCheckbox:SetControlChecked(IsEditModeChecked())
+	editModeCheckbox:UpdateDisplay()
+end)
+-- While Edit Mode shows an attached frame, it stands in for itself when the Pet Frame is hidden, so
+-- it is re-placed when the Pet Frame appears or disappears (for example through Blizzard's Pet
+-- Frame checkbox). Checked here, while Edit Mode is open, rather than by hooking the Pet Frame.
+editModePanel:SetScript("OnUpdate", function()
+	PlaceEditModePanel()
+	local visible = PetFrame:IsVisible()
+	if visible ~= petFrameVisible then
+		petFrameVisible = visible
+		if previewing then
+			ApplyLayout()
+		end
+	end
+end)
+
+local function OnEnabledChanged()
+	ApplyLayout()
+	if editModePanel:IsShown() then
+		editModeCheckbox:UpdateDisplay()
+	end
+end
+
+local function RegisterOptions()
+	local category = Settings.RegisterVerticalLayoutCategory("Simple Pet Target")
+	local setting = Settings.RegisterAddOnSetting(category, "SIMPLE_PET_TARGET_ENABLED", "enabled", db, Settings.VarType.Boolean, "Show Pet Target Frame", true)
+	setting:SetValueChangedCallback(OnEnabledChanged)
+	Settings.CreateCheckbox(category, setting, "Shows your pet's target in a frame like Target of Target, next to the Pet Frame or wherever you place it in Edit Mode. A change made in combat takes effect when combat ends.")
+	Settings.RegisterAddOnCategory(category)
+end
+
+local function OnEditModeEnter()
+	-- Like Blizzard's Pet Frame checkbox (SetupPetFrame): a frame that is already showing can always
+	-- be placed, so the box checks itself for this session, without saving that.
+	checkedForSession = IsEnabled() and UnitExists(UNIT) and not UnitIsDead("pet")
+	editModePanel:Show()
+	ApplyLayout()
+end
+
 local function OnEditModeExit()
+	checkedForSession = false
+	editModePanel:Hide()
 	ResetEditModeDialog()
 	ApplyLayout()
 end
@@ -872,6 +1047,12 @@ local function OnAddonLoaded()
 	db = SimplePetTargetDB
 	db.layouts = db.layouts or {}
 	db.dispelTypeIDs = db.dispelTypeIDs or {}
+	-- The first beta turned the frame on and off per layout; that is account-wide (db.enabled) now.
+	for _, settings in pairs(db.layouts) do
+		settings.enabled = nil
+	end
+
+	RegisterOptions()
 
 	-- Registered after the saved variables load: LibEditMode can report the active layout at once.
 	LEM:AddFrame(frame, OnPositionChanged, defaultPosition, SYSTEM_NAME)
@@ -885,8 +1066,15 @@ local function OnAddonLoaded()
 			startDrag(self, ...)
 		end
 	end)
+	-- LibEditMode shows every selection again whenever it resets them; keep this one hidden while
+	-- Edit Mode doesn't show the frame (UpdateSelection).
+	selection:HookScript("OnShow", function(self)
+		if not ShowsInEditMode() then
+			self:Hide()
+		end
+	end)
 
-	LEM:RegisterCallback("enter", ApplyLayout)
+	LEM:RegisterCallback("enter", OnEditModeEnter)
 	LEM:RegisterCallback("exit", OnEditModeExit)
 	LEM:RegisterCallback("layout", ApplyLayout)
 	LEM:RegisterCallback("create", OnLayoutCreated)
@@ -894,16 +1082,6 @@ local function OnAddonLoaded()
 	LEM:RegisterCallback("delete", OnLayoutDeleted)
 	ApplyLayout()
 end
-
--- In Edit Mode an attached frame stands in for itself while the Pet Frame is hidden, so re-place it
--- when the Pet Frame appears or disappears (for example through Edit Mode's Pet Frame option).
-local function OnPetFrameShownChanged()
-	if previewing then
-		ApplyLayout()
-	end
-end
-PetFrame:HookScript("OnShow", OnPetFrameShownChanged)
-PetFrame:HookScript("OnHide", OnPetFrameShownChanged)
 
 events:SetScript("OnEvent", function(_, event, arg1)
 	if event == "ADDON_LOADED" then

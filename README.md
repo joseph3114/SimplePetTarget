@@ -2,7 +2,7 @@
 
 A World of Warcraft Forever addon that adds a **Pet Target Frame**: a small frame showing whatever your pet is targeting. It looks and behaves like Blizzard's own Target of Target frame.
 
-> **Beta:** debuffs show out of combat only for now. The game blocks addons from reading auras in combat; a version that shows them through Blizzard's secure aura display is in progress.
+> **Note:** debuffs show out of combat only for now. The game blocks addons from reading auras in combat; showing them through Blizzard's secure aura display is planned.
 
 ## Features
 
@@ -13,15 +13,20 @@ A World of Warcraft Forever addon that adds a **Pet Target Frame**: a small fram
 - Appears automatically whenever your pet has a target, including in combat
 - Follows your Blizzard settings for dispellable debuffs and class-icon portraits
 
+## Turning it on or off
+
+**Options › AddOns › Simple Pet Target › Show Pet Target Frame** turns the frame on or off, like Blizzard's Target of Target option.
+
 ## Edit Mode
 
-Open Edit Mode and the **Pet Target Frame** shows up with the rest of your frames. Click it to open its options:
+Open Edit Mode and the **Pet Target Frame** shows up with the rest of your frames. A small **Simple Pet Target** panel next to the HUD Edit Mode window has a **Pet Target Frame** checkbox that works like Blizzard's Pet Frame checkbox: uncheck it to leave the frame out of Edit Mode. It's greyed out while the frame is turned off in Options.
 
-- **Show Pet Target Frame**: turn the frame on or off
+Click the frame to open its options:
+
 - **Attach to Pet Frame** (on by default): sits next to your Pet Frame and follows its position and size, like Target of Target does with the Target frame
 - **Frame Size**: 100% to 200%, used when the frame isn't attached
 
-When it isn't attached, drag it anywhere. Position and options are saved per Edit Mode layout.
+When it isn't attached, drag it anywhere. Position, Attach to Pet Frame and Frame Size are saved per Edit Mode layout; the two on/off checkboxes apply to all layouts.
 
 ## Libraries
 

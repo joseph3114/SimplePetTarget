@@ -42,3 +42,5 @@ jobs:
         with:
           name: SimplePetTarget
           path: .release/*.zip
+          include-hidden-files: true # .release is a hidden folder, skipped by default
+          if-no-files-found: error

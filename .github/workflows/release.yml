@@ -1,0 +1,56 @@
+name: Release
+
+# Publishes a GitHub release with the packaged zip for every version tag. CurseForge builds and
+# publishes its own files from the same tag through its webhook; this workflow never uploads there
+# (the packager runs with -d and has no CurseForge key).
+#
+# The notes are the commit messages since the previous tag. If a release for the tag already
+# exists (for example one written by hand), only the zip is attached to it.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and attach a zip for
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: GitHub release
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0 # the packager names the version from tags and history
+
+      - name: Package (no upload)
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -d
+
+      - name: Publish the release
+        run: |
+          zip=$(ls .release/*.zip)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$zip" --clobber
+            exit 0
+          fi
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)
+          {
+            git log --no-merges --format='### %s%n%n%b' ${prev:+"$prev.."}"$TAG" \
+              | grep -viE '^(co-authored-by|signed-off-by):'
+            echo
+            echo "Also on [CurseForge](https://www.curseforge.com/wow/addons/simple-pet-target)."
+          } > notes.md
+          flags=()
+          case "$TAG" in *alpha*|*beta*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" "$zip" --verify-tag --title "Simple Pet Target $TAG" --notes-file notes.md "${flags[@]}"

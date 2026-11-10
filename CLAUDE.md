@@ -72,5 +72,6 @@ The aura APIs error for addon code while auras are secret.
 1. Work happens on `feature/simple-pet-target`. Merge (fast-forward) into `main`, the GitHub default branch.
 2. Tag `main` as `vX.Y.Z` and push the tag, **with the user's OK**. CurseForge's webhook packages it: a tag containing `beta` becomes a Beta, anything else a Release. `## Version: @project-version@` is filled in from the tag.
 3. The GitHub webhook delivery should return 200, and the file appears on CurseForge as Processing, then goes through review.
+4. The same tag runs the **Release** workflow (`.github/workflows/release.yml`). It packages with `-d` (never uploads to CurseForge) and creates the GitHub release with the zip attached. Its notes come from the commit messages since the previous tag, with `Co-Authored-By` and `Signed-off-by` lines stripped, so write commit bodies as release notes. Tags with `beta` or `alpha` become pre-releases. To write the notes by hand instead, create the release first (`gh release create vX.Y.Z --notes-file …`); the workflow then only attaches the zip. To re-attach a zip to an existing tag, run the workflow manually with that tag.
 
 CurseForge project ID: 1794445 (https://www.curseforge.com/wow/addons/simple-pet-target).

@@ -22,12 +22,12 @@ permissions:
 jobs:
   release:
     name: GitHub release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
           fetch-depth: 0 # the packager names the version from tags and history

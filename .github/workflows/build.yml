@@ -14,9 +14,9 @@ permissions:
 jobs:
   build:
     name: Package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # the packager names the version from tags and history
 
@@ -38,7 +38,7 @@ jobs:
           if unzip -p "$zip" SimplePetTarget/SimplePetTarget.toc | grep -q '@project-version@'; then echo "::error::the version was not filled in"; exit 1; fi
 
       - name: Upload the zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: SimplePetTarget
           path: .release/*.zip

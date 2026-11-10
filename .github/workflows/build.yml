@@ -1,0 +1,44 @@
+name: Build
+
+# Builds the addon zip the way CurseForge does (BigWigs packager, using .pkgmeta) without
+# uploading it anywhere. CurseForge still builds and publishes releases itself, from tags.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the packager names the version from tags and history
+
+      - name: Package (no upload)
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -d
+
+      - name: Check the package
+        run: |
+          zip=$(ls .release/*.zip)
+          unzip -l "$zip"
+          for f in SimplePetTarget/SimplePetTarget.toc SimplePetTarget/SimplePetTarget.lua SimplePetTarget/SimplePetTarget.xml SimplePetTarget/Libs/LibEditMode/LibEditMode.lua; do
+            unzip -l "$zip" "$f" >/dev/null || { echo "::error::$f is missing from the package"; exit 1; }
+          done
+          for f in tests README.md assets .github .luacheckrc; do
+            if unzip -l "$zip" "SimplePetTarget/$f*" >/dev/null 2>&1; then echo "::error::$f should not be in the package"; exit 1; fi
+          done
+          if unzip -p "$zip" SimplePetTarget/SimplePetTarget.toc | grep -q '@project-version@'; then echo "::error::the version was not filled in"; exit 1; fi
+
+      - name: Upload the zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimplePetTarget
+          path: .release/*.zip

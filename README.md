@@ -1,5 +1,7 @@
 # Simple Pet Target
 
+[![Build](https://github.com/joseph3114/SimplePetTarget/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/joseph3114/SimplePetTarget/actions/workflows/build.yml) [![Lint](https://github.com/joseph3114/SimplePetTarget/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/joseph3114/SimplePetTarget/actions/workflows/lint.yml) [![Tests](https://github.com/joseph3114/SimplePetTarget/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/joseph3114/SimplePetTarget/actions/workflows/tests.yml) [![CurseForge](https://img.shields.io/curseforge/v/1794445?label=CurseForge)](https://www.curseforge.com/wow/addons/simple-pet-target)
+
 A World of Warcraft Forever addon that adds a **Pet Target Frame**: a small frame showing whatever your pet is targeting. It looks and behaves like Blizzard's own Target of Target frame.
 
 ## Features
@@ -38,7 +40,23 @@ The repository folder is the addon folder. To test changes in game, link it into
 New-Item -ItemType Junction -Path "D:\WoW\World of Warcraft\_forever_\Interface\AddOns\SimplePetTarget" -Target "C:\Users\josep\claude\SimplePetTarget"
 ```
 
-Releases are built by CurseForge's automatic packaging from tagged commits. `.pkgmeta` leaves the `assets` folder (logos and the scripts that draw them) and this README out of the package.
+Releases are built by CurseForge's automatic packaging from tagged commits. `.pkgmeta` leaves the `assets` folder (logos and the scripts that draw them), the tests, the GitHub workflows and this README out of the package.
+
+### Checks
+
+GitHub Actions runs three checks on every push and pull request:
+
+- **Build** packages the addon with the same packager CurseForge uses, without uploading it, and checks what went into the zip. The zip is attached to the run.
+- **Lint** runs [luacheck](https://github.com/lunarmodules/luacheck) on the addon's code (`.luacheckrc` lists the game API it uses) and checks the XML is well-formed.
+- **Tests** loads the addon and LibEditMode, in TOC order, into a stand-in for the game (`tests/wowmock.lua`) and plays through logging in, pet targets, combat, the Options checkbox, Edit Mode and debuffs. The stand-in hides values the way the client does (secret values) and refuses protected changes in combat, so the tests catch code that would break in game. Each run's summary page lists every test.
+
+To run the tests yourself, with Lua 5.1 or LuaJIT:
+
+```sh
+lua tests/run.lua
+```
+
+Without Lua installed, `python tests/lupa_run.py` runs them with the LuaJIT in the [lupa](https://pypi.org/project/lupa/) package. Name spec files to run only those, for example `lua tests/run.lua 05_debuffs`.
 
 ## License
 

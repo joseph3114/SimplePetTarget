@@ -5,6 +5,7 @@ self = false -- methods such as ShouldEnable don't need to use self
 exclude_files = {
 	"Libs/", -- LibEditMode, included unmodified
 	".release/", -- the packager's output
+	".lua/", ".luarocks/", ".install/", -- tools a CI run may install into the checkout
 }
 
 globals = {
@@ -29,5 +30,5 @@ read_globals = {
 
 -- The tests and the WoW stand-in define the game's globals themselves.
 files["tests/"] = {
-	ignore = { "11.", "12.", "13.", "21.", "4.." },
+	ignore = { "11.", "12.", "13.", "14.", "21.", "4.." },
 }

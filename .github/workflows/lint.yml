@@ -15,19 +15,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: leafo/gh-actions-lua@v10
-        with:
-          luaVersion: "5.1"
-
-      - uses: leafo/gh-actions-luarocks@v4
-
-      - name: Install luacheck
-        run: luarocks install luacheck
+      - name: Install luacheck and xmllint
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends lua-check libxml2-utils >/dev/null
+          luacheck --version
 
       - name: luacheck
         run: luacheck . --formatter plain --codes
 
       - name: XML is well-formed
-        run: |
-          sudo apt-get install -y --no-install-recommends libxml2-utils >/dev/null
-          xmllint --noout SimplePetTarget.xml Libs/LibEditMode/embed.xml
+        run: xmllint --noout SimplePetTarget.xml Libs/LibEditMode/embed.xml

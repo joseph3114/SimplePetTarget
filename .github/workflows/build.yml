@@ -32,7 +32,7 @@ jobs:
           for f in SimplePetTarget/SimplePetTarget.toc SimplePetTarget/SimplePetTarget.lua SimplePetTarget/SimplePetTarget.xml SimplePetTarget/Libs/LibEditMode/LibEditMode.lua; do
             unzip -l "$zip" "$f" >/dev/null || { echo "::error::$f is missing from the package"; exit 1; }
           done
-          for f in tests README.md assets .github .luacheckrc; do
+          for f in tests README.md CLAUDE.md assets .github .luacheckrc; do
             if unzip -l "$zip" "SimplePetTarget/$f*" >/dev/null 2>&1; then echo "::error::$f should not be in the package"; exit 1; fi
           done
           if unzip -p "$zip" SimplePetTarget/SimplePetTarget.toc | grep -q '@project-version@'; then echo "::error::the version was not filled in"; exit 1; fi

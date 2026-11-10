@@ -32,7 +32,7 @@ describe("Package", function()
 
 	it("the package leaves out tests, assets and the README", function()
 		local pkgmeta = readFile(".pkgmeta")
-		for _, ignored in ipairs({ "tests", "assets", "README.md", ".github", ".luacheckrc" }) do
+		for _, ignored in ipairs({ "tests", "assets", "README.md", "CLAUDE.md", ".github", ".luacheckrc" }) do
 			ok(pkgmeta:find("%- " .. ignored:gsub("%p", "%%%0") .. "%s"), ".pkgmeta ignores " .. ignored)
 		end
 	end)

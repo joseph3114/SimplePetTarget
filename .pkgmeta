@@ -6,3 +6,4 @@ ignore:
   - tests
   - .github
   - .luacheckrc
+  - CLAUDE.md

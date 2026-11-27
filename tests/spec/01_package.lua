@@ -36,4 +36,25 @@ describe("Package", function()
 			ok(pkgmeta:find("%- " .. ignored:gsub("%p", "%%%0") .. "%s"), ".pkgmeta ignores " .. ignored)
 		end
 	end)
+	it("the XML templates define every key the Lua uses", function()
+		local xml = readFile("SimplePetTarget.xml")
+		local debuffStart = xml:find('name="SimplePetTargetDebuffTemplate"', 1, true)
+		local frameStart = xml:find('name="SimplePetTargetFrameTemplate"', 1, true)
+		ok(debuffStart and frameStart and debuffStart < frameStart, "both templates, the debuff one first")
+		local debuff, frame = xml:sub(debuffStart, frameStart - 1), xml:sub(frameStart)
+		local function count(block, key)
+			return select(2, block:gsub('parentKey="' .. key .. '"', ""))
+		end
+		for _, key in ipairs({ "Icon", "Border", "Cooldown" }) do
+			eq(count(debuff, key), 1, "debuff template " .. key)
+		end
+		for _, key in ipairs({ "Portrait", "PortraitRed", "Name", "HealthBar", "ManaBar", "DeadText", "UnconsciousText", "HealthBarMask", "ManaBarMask", "Spark" }) do
+			eq(count(frame, key), 1, "frame template " .. key)
+		end
+		for _, key in ipairs({ "TextString", "LeftText", "RightText" }) do
+			eq(count(frame, key), 2, "frame template " .. key .. ", one per bar")
+		end
+		ok(frame:match('^[^>]*virtual="true"'), "the frame template is virtual")
+		ok(frame:match('^[^>]*inherits="[^"]*SecureUnitButtonTemplate'), "the frame template is a secure unit button")
+	end)
 end)

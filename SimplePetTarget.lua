@@ -42,6 +42,7 @@ local previewShown = false -- shown for Edit Mode with the state driver off (pro
 local pendingLayout = false -- protected changes waiting for combat to end
 local appliedEnabled = true -- IsEnabled() as last applied out of combat; the frame follows this one
 local checkedForSession = false -- the Edit Mode checkbox is on for this Edit Mode session only
+local appliedLayoutName -- the Edit Mode layout whose settings ApplyPosition last used
 
 local frame = CreateFrame("Button", "SimplePetTargetFrame", UIParent, "SimplePetTargetFrameTemplate")
 frame.unit = UNIT -- read by PingableType_UnitFrameMixin
@@ -176,7 +177,8 @@ local function GetDefaultDetachedPosition(scale)
 end
 
 local function ApplyPosition()
-	local settings = GetActiveSettings()
+	appliedLayoutName = LEM:GetActiveLayoutName()
+	local settings = GetSettings(appliedLayoutName)
 	frame:ClearAllPoints()
 	frame:SetClampedToScreen(not settings.attached)
 	if settings.attached and (not previewing or PetFrame:IsVisible()) then
@@ -424,6 +426,8 @@ local function UpdateSpark(sparkInfo)
 	spark:SetAtlas(sparkInfo.atlas, true)
 	if sparkInfo.barHeight and sparkInfo.barHeight > 0 then
 		spark:SetScale(MANA_BAR_HEIGHT / sparkInfo.barHeight)
+	else
+		spark:SetScale(1)
 	end
 	manaBar.sparkCurve = sparkInfo.showAtMax and SPARK_AT_MAX_ALPHA_CURVE or SPARK_ALPHA_CURVE
 	spark:Show()
@@ -866,14 +870,35 @@ for key, globalName in pairs({ Modern = "LAYOUT_STYLE_MODERN", Classic = "LAYOUT
 	end
 end
 
+-- A new layout starts with the settings of the layout it was copied from, like Blizzard's frames.
+-- LibEditMode finds the new layout by its place in the list, taking it to be the last one. The game
+-- puts a new account-wide layout before the character-specific ones, though, and then LibEditMode
+-- reports the last character layout instead. So look the new layout up by name: while this runs,
+-- LibEditMode's layoutCache is still the list from before.
 local function OnLayoutCreated(layoutName, _, sourceLayoutName)
-	-- Never overwrite: LibEditMode can report an existing layout here when the list shifts.
-	if db.layouts[layoutName] then
-		return
-	end
 	local sourceName = sourceLayoutName and (PRESET_LAYOUT_KEYS[sourceLayoutName] or sourceLayoutName) or LEM:GetActiveLayoutName()
-	local source = sourceName and db.layouts[sourceName]
-	db.layouts[layoutName] = CopyTable(source or DEFAULT_SETTINGS)
+	local source = sourceName and db.layouts[sourceName] or DEFAULT_SETTINGS
+	local created = {}
+	local layoutInfo = type(LEM.layoutCache) == "table" and C_EditMode and C_EditMode.GetLayouts()
+	if layoutInfo and layoutInfo.layouts then
+		local known = {}
+		for _, layout in ipairs(LEM.layoutCache) do
+			known[layout.layoutName] = true
+		end
+		for _, layout in ipairs(layoutInfo.layouts) do
+			if not known[layout.layoutName] then
+				table.insert(created, layout.layoutName)
+			end
+		end
+	else
+		table.insert(created, layoutName)
+	end
+	for _, name in ipairs(created) do
+		-- Never overwrite settings that are already there.
+		if not db.layouts[name] then
+			db.layouts[name] = CopyTable(source)
+		end
+	end
 end
 
 local function OnLayoutRenamed(oldLayoutName, newLayoutName)
@@ -1029,11 +1054,29 @@ local events = CreateFrame("Frame")
 local function OnAddonLoaded()
 	SimplePetTargetDB = SimplePetTargetDB or {}
 	db = SimplePetTargetDB
-	db.layouts = db.layouts or {}
 	db.dispelTypeIDs = nil -- learned by older versions; the aura container needs none
-	-- The first beta turned the frame on and off per layout; that is account-wide (db.enabled) now.
-	for _, settings in pairs(db.layouts) do
-		settings.enabled = nil
+	if type(db.layouts) ~= "table" then
+		db.layouts = {}
+	end
+	-- Every layout's settings must be complete: ApplyPosition does arithmetic on them, after it has
+	-- cleared the frame's anchors. Fill in or drop anything a damaged or hand-edited file lacks.
+	for layoutName, settings in pairs(db.layouts) do
+		if type(settings) ~= "table" then
+			db.layouts[layoutName] = nil
+		else
+			-- The first beta turned the frame on and off per layout; that is account-wide (db.enabled) now.
+			settings.enabled = nil
+			if type(settings.attached) ~= "boolean" then
+				settings.attached = DEFAULT_SETTINGS.attached
+			end
+			if type(settings.frameSize) ~= "number" then
+				settings.frameSize = DEFAULT_SETTINGS.frameSize
+			end
+			settings.frameSize = math.min(math.max(settings.frameSize, FRAME_SIZE_MIN), FRAME_SIZE_MAX)
+			if type(settings.point) ~= "string" or type(settings.x) ~= "number" or type(settings.y) ~= "number" then
+				settings.point, settings.x, settings.y = nil, nil, nil
+			end
+		end
 	end
 
 	RegisterOptions()
@@ -1086,6 +1129,13 @@ events:SetScript("OnEvent", function(_, event, arg1)
 		if pendingLayout then
 			ApplyLayout()
 		end
+	elseif event == "EDIT_MODE_LAYOUTS_UPDATED" then
+		-- LibEditMode reports a layout change only when the active layout's place in the list
+		-- changes. A new layout can take the place of the one that was active (see OnLayoutCreated),
+		-- so compare names as well.
+		if db and LEM:GetActiveLayoutName() ~= appliedLayoutName then
+			ApplyLayout()
+		end
 	else
 		-- UNIT_TARGET (pet), UNIT_PET, PORTRAITS_UPDATED: "pettarget" has no unit events of its own.
 		SyncVisibility()
@@ -1099,6 +1149,7 @@ events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("PLAYER_ENTERING_WORLD")
 events:RegisterEvent("PLAYER_REGEN_DISABLED")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
+events:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
 events:RegisterEvent("PORTRAITS_UPDATED")
 events:RegisterUnitEvent("UNIT_TARGET", "pet")
 events:RegisterUnitEvent("UNIT_PET", "player")

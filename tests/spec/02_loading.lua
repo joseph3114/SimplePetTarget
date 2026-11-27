@@ -45,4 +45,29 @@ describe("Loading", function()
 		eq(G.SimplePetTargetDB.layouts.Mine.enabled, nil, "per-layout enabled")
 		eq(G.SimplePetTargetDB.layouts.Mine.attached, true, "other per-layout settings are kept")
 	end)
+	it("repairs damaged saved settings instead of breaking on them", function()
+		local G = NewGame()
+		G.SimplePetTargetDB = { layouts = {
+			Modern = {}, -- the active layout
+			Classic = { attached = false, frameSize = 900, point = "CENTER" },
+			Mine = "oops",
+		} }
+		G.Login()
+		G.SetPet(true)
+		G.Tick()
+		local layouts = G.SimplePetTargetDB.layouts
+		eq(layouts.Modern.attached, true, "missing attached")
+		eq(layouts.Modern.frameSize, 100, "missing frameSize")
+		eq(layouts.Classic.frameSize, 200, "frameSize out of range")
+		eq(layouts.Classic.point, nil, "a position without offsets")
+		eq(layouts.Mine, nil, "an entry that isn't a table")
+		eq(G.SimplePetTargetFrame:GetParent(), G.PetFrame, "the frame is placed")
+		eq(Problems(G), "", "problems")
+
+		local H = NewGame()
+		H.SimplePetTargetDB = { layouts = 5 }
+		H.Login()
+		eq(type(H.SimplePetTargetDB.layouts), "table", "layouts that isn't a table")
+		eq(Problems(H), "", "problems")
+	end)
 end)

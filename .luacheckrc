@@ -14,7 +14,7 @@ globals = {
 
 -- The game's API, as used by SimplePetTarget.lua.
 read_globals = {
-	"AbbreviateLargeNumbers", "AuraContainerSortDirection", "AuraContainerSortMethod", "C_CurveUtil",
+	"AbbreviateLargeNumbers", "AuraContainerSortDirection", "AuraContainerSortMethod", "C_CurveUtil", "C_EditMode",
 	"C_LFGInfo", "C_PartyInfo", "C_PlayerInfo", "C_Secrets", "C_StringUtil", "C_Timer", "Constants",
 	"CopyTable", "CreateFrame", "EditModeManagerFrame", "Enum", "FormatPercentage", "GetCVar",
 	"GetCVarBool", "GetClassAtlas", "GetScreenWidth", "HUD_EDIT_MODE_SETTING_UNIT_FRAME_FRAME_SIZE",

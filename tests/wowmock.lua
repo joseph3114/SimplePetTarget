@@ -117,22 +117,32 @@ HUD_EDIT_MODE_SETTING_UNIT_FRAME_FRAME_SIZE = "Frame Size"
 HUD_EDIT_MODE_INSTRUCTIONS_CLICK_TO_EDIT = "Click to edit"
 LAYOUT_STYLE_MODERN = "Modern"
 LAYOUT_STYLE_CLASSIC = "Classic"
+LAYOUT_STYLE_GAMEPAD = "Gamepad"
+-- The three preset layouts of this client (Mainline/EditModePresetLayouts.lua), so the layouts
+-- players make start at index 4.
 EDIT_MODE_MODERN_SYSTEM_MAP = {}
 EDIT_MODE_CLASSIC_SYSTEM_MAP = {}
+EDIT_MODE_GAMEPAD_SYSTEM_MAP = {}
+NUM_PRESET_LAYOUTS = 3
 function FormatPercentage(v) return tostring(math.floor(v * 100 + 0.5)) .. "%" end
 
 Enum = {
 	EditModeSettingDisplayType = { Dropdown = 0, Checkbox = 1, Slider = 2 },
 	LuaCurveType = { Linear = 0, Step = 1 },
-	CustomAuraButtonDispelTypeTextureStyle = { Recolor = 0, PreserveAsset = 1 },
+	CustomAuraButtonDispelTypeTextureStyle = { Border = 0, BorderWithIcon = 1, Icon = 2, PreserveAsset = 3, CustomAsset = 4 },
 }
 
 ---------------------------------------------------------------------------------------------------
 -- Secret values
 ---------------------------------------------------------------------------------------------------
 -- A secret wraps a value that addon code may pass to widgets and to the APIs that accept secrets,
--- but may not read. Comparing one or doing arithmetic on one raises an error, as in the client.
--- Concatenation is allowed and gives another secret. Tests read them back with Reveal.
+-- but may not read. Ordering one (<, <=), doing arithmetic on one, taking its length or indexing it
+-- raises an error, as in the client. Concatenation is allowed and gives another secret. Tests read
+-- them back with Reveal.
+--
+-- NOT caught here: ==, ~=, tests for truth (if, and, or, not) and use as a table key. Lua 5.1 calls
+-- no metamethod for those, so the stand-in can't see them. A green run doesn't prove such code is
+-- safe; guard it with issecretvalue and check it in game.
 local SecretMT = {}
 local function Secret(v) return setmetatable({ __value = v }, SecretMT) end
 local function IsSecret(v) return getmetatable(v) == SecretMT end
@@ -199,6 +209,10 @@ local RESTRICTED = {
 	Show = true, Hide = true, SetShown = true, SetPoint = true, ClearAllPoints = true, SetAllPoints = true,
 	SetParent = true, SetScale = true, SetClampedToScreen = true, SetMovable = true, StartMoving = true,
 	SetSize = true, SetWidth = true, SetHeight = true, EnableMouse = true, SetAttribute = true,
+	-- Also IsProtectedFunction in the client's API documentation (SimpleFrameAPIDocumentation.lua and
+	-- SimpleScriptRegionAPIDocumentation.lua).
+	StopMovingOrSizing = true, SetFrameStrata = true, SetFrameLevel = true, Raise = true, SetID = true,
+	EnableKeyboard = true, SetPropagateMouseMotion = true,
 }
 
 local Region = {}
@@ -397,7 +411,8 @@ function Region:SetJustifyV() end
 function Region:IsTruncated() return false end
 function Region:SetFontObjectsToTry() end
 function Region:SetTexture() end
-function Region:SetAtlas() end
+function Region:SetAtlas(atlas) rawset(self, "__atlas", atlas) end
+function Region:GetAtlas() return rawget(self, "__atlas") end
 function Region:SetColorTexture() end
 function Region:SetVertexColor() end
 function Region:SetTexCoord() end
@@ -411,8 +426,8 @@ function Region:Clear() end
 function Region:SetCooldownFromDurationObject() end
 -- statusbars
 function Region:GetStatusBarTexture() return rawget(self, "__bartex") end
-function Region:SetStatusBarTexture() end
-function Region:SetStatusBarColor() end
+function Region:SetStatusBarTexture(texture) rawset(self, "__bartexName", texture) end
+function Region:SetStatusBarColor(r, g, b) rawset(self, "__barColor", { r, g, b }) end
 function Region:SetMinMaxValues(a, b) rawset(self, "__min", a); rawset(self, "__max", b) end
 function Region:GetMinMaxValues() return rawget(self, "__min") or 0, rawget(self, "__max") or 1 end
 function Region:SetValue(v) rawset(self, "__value", v) end
@@ -486,9 +501,9 @@ TEMPLATES.SimplePetTargetFrameTemplate = function(f)
 	f.Portrait = f:CreateTexture()
 	f.PortraitRed = f:CreateTexture()
 	f.Name = f:CreateFontString()
-	local function bar(key, h)
+	local function bar(key, w, h)
 		local b = CreateFrame("StatusBar", nil, f)
-		b:SetSize(70, h)
+		b:SetSize(w, h)
 		rawset(b, "__bartex", b:CreateTexture())
 		b.TextString = b:CreateFontString(); rawset(b.TextString, "__shown", false)
 		b.LeftText = b:CreateFontString(); rawset(b.LeftText, "__shown", false)
@@ -496,11 +511,11 @@ TEMPLATES.SimplePetTargetFrameTemplate = function(f)
 		f[key] = b
 		return b
 	end
-	local hb = bar("HealthBar", 11)
+	local hb = bar("HealthBar", 70, 11)
 	hb.DeadText = hb:CreateFontString(); rawset(hb.DeadText, "__shown", false)
 	hb.UnconsciousText = hb:CreateFontString(); rawset(hb.UnconsciousText, "__shown", false)
 	hb.HealthBarMask = hb:CreateMaskTexture()
-	local mb = bar("ManaBar", 7)
+	local mb = bar("ManaBar", 78, 7)
 	mb.Spark = mb:CreateTexture(); rawset(mb.Spark, "__shown", false)
 	mb.ManaBarMask = mb:CreateMaskTexture()
 end
@@ -881,7 +896,48 @@ function EMF:SelectLayout(index)
 			EMF.petFrameControlChecked = EMF.petFrameChecked
 		end
 	end)
-	EventRegistry:TriggerEvent("EDIT_MODE_LAYOUTS_UPDATED", C_EditMode.GetLayouts())
+	DispatchEvent("EDIT_MODE_LAYOUTS_UPDATED", C_EditMode.GetLayouts())
+end
+
+-- What Blizzard's Edit Mode manager does when the player makes, renames or deletes a layout
+-- (EditModeManagerFrameMixin:MakeNewLayout, RenameLayout and DeleteLayout). Layout types: 1 is
+-- account-wide, 2 is character-specific. A new layout goes after the last one of its type, so an
+-- account-wide one lands before every character-specific one. The game saves the list
+-- ("EditMode.SavedLayouts") before it makes the new layout the active one.
+-- source: the layout it is copied from, a layout's name or a preset's localized name.
+function MakeNewLayout(name, layoutType, source)
+	EMF:ShowNewLayoutDialog(source and { layoutName = source })
+	local index = 1
+	for i, layout in ipairs(LAYOUTS.layouts) do
+		if layout.layoutType <= layoutType then index = i + 1 end
+	end
+	table.insert(LAYOUTS.layouts, index, { layoutName = name, layoutType = layoutType })
+	EventRegistry:TriggerEvent("EditMode.SavedLayouts")
+	LAYOUTS.activeLayout = index + NUM_PRESET_LAYOUTS
+	DispatchEvent("EDIT_MODE_LAYOUTS_UPDATED", C_EditMode.GetLayouts())
+end
+local function LayoutIndex(name)
+	for i, layout in ipairs(LAYOUTS.layouts) do
+		if layout.layoutName == name then return i end
+	end
+	error("no layout named " .. tostring(name), 3)
+end
+function RenameLayout(oldName, newName)
+	LAYOUTS.layouts[LayoutIndex(oldName)].layoutName = newName
+	EventRegistry:TriggerEvent("EditMode.SavedLayouts")
+end
+-- Deleting the active layout switches to the first preset.
+function DeleteLayout(name)
+	local index = LayoutIndex(name)
+	local active = LAYOUTS.activeLayout - NUM_PRESET_LAYOUTS
+	table.remove(LAYOUTS.layouts, index)
+	EventRegistry:TriggerEvent("EditMode.SavedLayouts")
+	if active == index then
+		LAYOUTS.activeLayout = 1
+	elseif active > index then
+		LAYOUTS.activeLayout = LAYOUTS.activeLayout - 1
+	end
+	DispatchEvent("EDIT_MODE_LAYOUTS_UPDATED", C_EditMode.GetLayouts())
 end
 
 ---------------------------------------------------------------------------------------------------
@@ -920,10 +976,15 @@ C_PlayerInfo = { ShouldDisplaySurname = function() return true end }
 NameUtil = { GetUnitFirstName = function(unit) return UNITS[unit] and UNITS[unit].name end }
 C_LFGInfo = { IsInLFGFollowerDungeon = function() return false end }
 C_PartyInfo = { IsPartyWalkIn = function() return false end }
+-- Shaped like the client's table (Mainline/PowerBarColorUtil.lua): the common powers name a part of
+-- an atlas, and only powers with an atlas of their own have a spark.
 PowerBarColor = {
-	MANA = { atlas = "UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Mana" },
+	MANA = { atlasElementName = "Mana" },
 	RAGE = { atlasElementName = "Rage" },
-	ENERGY = { atlasElementName = "Energy", spark = { atlas = "spark", barHeight = 10, xOffset = 1 } },
+	FOCUS = { atlasElementName = "Focus" },
+	ENERGY = { atlasElementName = "Energy" },
+	INSANITY = { atlas = "Unit_Priest_Insanity_Fill", spark = { atlas = "Unit_Priest_Insanity_EndCap", xOffset = 1, barHeight = 10, showAtMax = false } },
+	MAELSTROM = { atlas = "Unit_Shaman_Maelstrom_Fill", spark = { atlas = "Unit_Shaman_Maelstrom_EndCap", barHeight = 10, showAtMax = true } },
 }
 
 ---------------------------------------------------------------------------------------------------
@@ -981,7 +1042,7 @@ function UnitHealth(unit) local u = U(unit) if u then return Secret(u.health) en
 function UnitHealthMax(unit) local u = U(unit) if u then return SecretIf(MaxSecret(u), u.maxHealth) end end
 function UnitPower(unit) local u = U(unit) if u then return SecretIf(CombatSecret(u), u.power) end end
 function UnitPowerMax(unit) local u = U(unit) if u then return SecretIf(MaxSecret(u), u.maxPower) end end
-function UnitPowerType(unit) local u = U(unit) if u then return u.powerType, u.powerToken end end
+function UnitPowerType(unit) local u = U(unit) if u then return u.powerType, u.powerToken, u.altR, u.altG, u.altB end end
 function UnitHasPowerType(unit, powerType) local u = U(unit) return u ~= nil and u.powerType == powerType end
 -- The percentage goes through the curve inside the "client", so the result is secret whenever the
 -- values are.
@@ -1004,8 +1065,36 @@ function SetPortraitTexture(texture, unit) texture:SetTexture("portrait:" .. tos
 ---------------------------------------------------------------------------------------------------
 -- Auras: Blizzard's secure aura container (CustomAuraContainerTemplate)
 ---------------------------------------------------------------------------------------------------
-AuraContainerSortMethod = { Default = 0, AuraInstanceIDOnly = 1 }
+AuraContainerSortMethod = {
+	Default = 0, BigDefensive = 1, UnitFrameDebuff = 2, ImportantOnly = 3, Expiration = 4, ExpirationOnly = 5,
+	Name = 6, NameOnly = 7, AuraInstanceIDOnly = 8,
+}
 AuraContainerSortDirection = { Normal = 0, Reverse = 1 }
+
+-- The container asserts on its arguments (Blizzard_CustomAuraContainer.lua, Blizzard_AuraButton.lua),
+-- so the stand-in does too.
+local function IsEnumValue(enum, value)
+	for _, v in pairs(enum) do
+		if v == value then return true end
+	end
+	return false
+end
+local AURA_FILTERS = {
+	HELPFUL = true, HARMFUL = true, PLAYER = true, RAID = true, CANCELABLE = true, DISPELLABLE = true,
+	INCLUDE_NAME_PLATE_ONLY = true, MAW = true, EXTERNAL_DEFENSIVE = true, CROWD_CONTROL = true,
+	RAID_IN_COMBAT = true, RAID_PLAYER_DISPELLABLE = true, BIG_DEFENSIVE = true, IMPORTANT = true,
+}
+local function AssertFilter(filter)
+	assert(type(filter) == "string", "aura filter must be a string")
+	for part in filter:gmatch("[^| ]+") do
+		assert(AURA_FILTERS[(part:gsub("^!", ""))], "invalid aura filter " .. part)
+	end
+end
+local TOOLTIP_ANCHORS = {
+	ANCHOR_TOP = true, ANCHOR_RIGHT = true, ANCHOR_BOTTOM = true, ANCHOR_LEFT = true, ANCHOR_TOPRIGHT = true,
+	ANCHOR_BOTTOMRIGHT = true, ANCHOR_TOPLEFT = true, ANCHOR_BOTTOMLEFT = true, ANCHOR_CURSOR = true,
+	ANCHOR_CURSOR_LEFT = true, ANCHOR_CURSOR_RIGHT = true, ANCHOR_PRESERVE = true, ANCHOR_NONE = true,
+}
 C_Secrets = { ShouldAurasBeSecret = function() return STATE.inCombat end }
 SHOW_CASTABLE_DEBUFFS = nil
 
@@ -1033,7 +1122,9 @@ TEMPLATES.CustomAuraButtonTemplate = function(f)
 	function f:GetDispelTypeTexture(i) return rawget(self, "__dispelTextures")[i] end
 	function f:SetDurationCooldown(c) if not LockedButtonCall(self, "SetDurationCooldown") then rawset(self, "__cooldown", c) end end
 	function f:GetDurationCooldown() return rawget(self, "__cooldown") end
-	function f:SetTooltipAnchorPoint(anchor)
+	function f:SetTooltipAnchorPoint(anchor, x, y)
+		assert(TOOLTIP_ANCHORS[anchor], "invalid tooltip anchor " .. tostring(anchor))
+		assert((x == nil or type(x) == "number") and (y == nil or type(y) == "number"), "tooltip offsets must be numbers or nil")
 		if not LockedButtonCall(self, "SetTooltipAnchorPoint") then rawset(self, "__tooltipAnchor", anchor) end
 	end
 	function f:GetTooltipAnchorPoint() return rawget(self, "__tooltipAnchor") end
@@ -1042,12 +1133,14 @@ end
 TEMPLATES.CustomAuraContainerTemplate = function(c)
 	rawset(c, "__groups", {})
 	rawset(c, "__updates", 0)
-	function c:SetUnit(unit) rawset(self, "__unit", unit) end
+	function c:SetUnit(unit) assert(type(unit) == "string", "SetUnit needs a unit token") rawset(self, "__unit", unit) end
 	function c:GetUnit() return rawget(self, "__unit") end
 	function c:SetEditModePreviewEnabled(v) rawset(self, "__preview", v) end
 	function c:IsEditModePreviewEnabled() return rawget(self, "__preview") end
 	function c:SetFlowLayoutMaximumLineSize(v) rawset(self, "__lineSize", v) end
 	function c:AddAuraGroup(key, filter, opts)
+		AssertFilter(filter)
+		assert(IsEnumValue(AuraContainerSortMethod, opts.sortMethod), "invalid sort method")
 		local group = { filter = filter, sortMethod = opts.sortMethod, frames = {}, opts = opts }
 		for _ = 1, opts.maxFrameCount do
 			local button = CreateFrame("Button", nil, self, "CustomAuraButtonTemplate, " .. table.concat(opts.templateNames, ", "))
@@ -1061,8 +1154,10 @@ TEMPLATES.CustomAuraContainerTemplate = function(c)
 	function c:GetAuraGroupFrameCount(key) local g = rawget(self, "__groups")[key] return g and #g.frames or 0 end
 	function c:GetAuraGroup(key) return rawget(self, "__groups")[key] end
 	function c:GetUpdateCount() return rawget(self, "__updates") end
-	function c:SetAuraGroupFilterString(key, filter) rawget(self, "__groups")[key].filter = filter end
+	function c:SetAuraGroupFilterString(key, filter) AssertFilter(filter) rawget(self, "__groups")[key].filter = filter end
 	function c:SetAuraGroupSortMethod(key, method, direction)
+		assert(IsEnumValue(AuraContainerSortMethod, method), "invalid sort method")
+		assert(IsEnumValue(AuraContainerSortDirection, direction), "invalid sort direction")
 		local g = rawget(self, "__groups")[key]
 		g.sortMethod, g.sortDirection = method, direction
 	end
@@ -1143,6 +1238,6 @@ end
 
 function Login()
 	DispatchEvent("ADDON_LOADED", "SimplePetTarget")
-	EventRegistry:TriggerEvent("EDIT_MODE_LAYOUTS_UPDATED", C_EditMode.GetLayouts())
+	DispatchEvent("EDIT_MODE_LAYOUTS_UPDATED", C_EditMode.GetLayouts())
 	DispatchEvent("PLAYER_ENTERING_WORLD")
 end

@@ -52,17 +52,21 @@ The aura APIs error for addon code while auras are secret.
 - The dialog stays bound to the frame after Edit Mode closes, and a layout change can re-show it. `ResetEditModeDialog` (`Hide` + `Reset`) runs on exit, on combat start, and when the frame leaves Edit Mode.
 - `resetSelection` re-shows every selection on enter and exit. A hooked selection `OnShow` hides ours while the frame isn't in Edit Mode.
 - Another addon's LibEditMode copy fires `EditModeExternal.hideDialog`, which hides our dialog without unbinding it.
+- Its `create` callback names the last layout in the list, but the game inserts a new account-wide layout before the character-specific ones. `OnLayoutCreated` finds the new layout by name instead (`LEM.layoutCache` is still the old list while the callback runs).
+- Its `layout` callback fires only when the active layout's index changes. A new layout can take the active one's index, so the addon also listens to `EDIT_MODE_LAYOUTS_UPDATED` and compares names (`appliedLayoutName`).
 
 ### Settings
 
 - The Options checkbox (`Settings.RegisterAddOnSetting`, `db.enabled`) and the Edit Mode panel checkbox (`db.showInEditMode`) are account-wide.
-- Attach, Frame Size and position are per layout (`db.layouts[layoutName]`).
+- Attach, Frame Size and position are per layout (`db.layouts[layoutName]`). `OnAddonLoaded` repairs incomplete entries, because `ApplyPosition` does arithmetic on them after clearing the frame's anchors. A new per-layout key needs a default there.
 - The panel checkbox checks itself for the session without saving (`checkedForSession`) when the frame is already showing, like Blizzard's Pet Frame checkbox. Its callback acts only on `isUserInput`.
 
 ## Checks
 
 - `python tests/lupa_run.py` runs the tests locally (no Lua installed here; lupa's LuaJIT). On GitHub, CI runs `lua5.1 tests/run.lua`. Pass spec names to run a subset, e.g. `05_debuffs`.
 - `tests/wowmock.lua` is a stand-in for the client: secret values that error on compare and arithmetic, protected frames that refuse changes in combat (`BLOCKED`), locked aura buttons and `AuraUtil` use (`VIOLATIONS`), and Edit Mode, Settings and LibEditMode templates. When the addon starts using a new API, add it to the mock **and** to `read_globals` in `.luacheckrc`.
+- The mock can't catch `==`, `~=`, truth tests (`if`, `and`, `or`, `not`) or table-key use of a secret: Lua 5.1 calls no metamethod for those. A green run doesn't prove such code safe.
+- The mock's layout helpers (`MakeNewLayout`, `RenameLayout`, `DeleteLayout`) follow Blizzard's order of events; the client has three preset layouts, so user layouts start at index 4.
 - Every test should end with `eq(Problems(G), "", "problems")` where it makes sense.
 - GitHub Actions has three workflows, Build, Lint and Tests, each with a README badge. Lua and luacheck come from Ubuntu packages (`lua5.1`, `lua-check`); downloads from lua.org timed out.
 - Before suggesting a release, the user tests in game, with BugSack clean, in and out of combat and in Edit Mode.

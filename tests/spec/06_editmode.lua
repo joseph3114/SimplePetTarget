@@ -147,6 +147,34 @@ describe("Edit Mode", function()
 		no(G.SimplePetTargetFrame:IsShown(), "shown after Edit Mode closed")
 		eq(Problems(G), "", "problems")
 	end)
+	it("without a pet out, stands where it would sit beside the Pet Frame, then attaches when that shows", function()
+		local G = NewGame()
+		G.Login()
+		G.Tick()
+		local frame = G.SimplePetTargetFrame
+		G.OpenEditMode()
+		G.Tick(2)
+		no(G.PetFrame:IsVisible(), "Pet Frame shown without a pet")
+		ok(Previewed(G), "frame and its selection shown")
+		eq(frame:GetParent(), G.UIParent, "parent while the Pet Frame is hidden")
+		G.EditModeManagerFrame:SetPetFrameCheckbox(true)
+		G.Tick(2)
+		ok(G.PetFrame:IsVisible(), "Pet Frame shown by its checkbox")
+		eq(frame:GetParent(), G.PetFrame, "parent once the Pet Frame shows")
+		eq(Problems(G), "", "problems")
+	end)
+
+	it("closes the frame's settings when combat starts", function()
+		local G = Start()
+		G.OpenEditMode()
+		G.Tick()
+		SelectFrame(G)
+		ok(Dialog(G):IsShown(), "settings open")
+		G.SetCombat(true)
+		no(Dialog(G):IsShown(), "settings still open in combat")
+		eq(Dialog(G).selection, nil, "settings still bound to the frame")
+		eq(Problems(G), "", "problems")
+	end)
 end)
 
 describe("Edit Mode › Frame settings", function()
@@ -215,5 +243,110 @@ describe("Edit Mode › Frame settings", function()
 		eq(G.SimplePetTargetFrame:GetScale(), 1, "scale in the other layout")
 		G.EditModeManagerFrame:SelectLayout(G.LAYOUTS.activeLayout - 1)
 		eq(G.SimplePetTargetFrame:GetScale(), 1.5, "scale back in the first layout")
+	end)
+	it("saves a detached frame's position in screen units, whatever its size", function()
+		local G = Start()
+		local LEM = G.NS.LibEditMode
+		local layout = LEM:GetActiveLayoutName()
+		local moved = LEM.frameCallbacks[G.SimplePetTargetFrame]
+		moved(G.SimplePetTargetFrame, layout, "TOPLEFT", 10, -20)
+		eq(G.SimplePetTargetDB.layouts[layout].point, nil, "an attached frame's position")
+		eq(G.SimplePetTargetFrame:GetParent(), G.PetFrame, "an attached frame goes back to the Pet Frame")
+
+		Setting(G, "Attach to Pet Frame").set(layout, false)
+		Setting(G, "Frame Size").set(layout, 150)
+		moved(G.SimplePetTargetFrame, layout, "TOPLEFT", 10, -20)
+		local settings = G.SimplePetTargetDB.layouts[layout]
+		eq(settings.point .. " " .. settings.x .. " " .. settings.y, "TOPLEFT 15 -30", "saved position")
+		local point, _, _, x, y = G.SimplePetTargetFrame:GetPoint(1)
+		eq(point .. " " .. x .. " " .. y, "TOPLEFT 10 -20", "the frame's anchor, in its own units")
+		eq(Problems(G), "", "problems")
+	end)
+end)
+
+-- The game keeps account-wide layouts before character-specific ones.
+local function TwoLayouts(active)
+	return function(G)
+		G.LAYOUTS.layouts = { { layoutName = "Acct", layoutType = 1 }, { layoutName = "Char", layoutType = 2 } }
+		G.LAYOUTS.activeLayout = G.NUM_PRESET_LAYOUTS + active
+	end
+end
+
+local function Detach(G, layout)
+	Setting(G, "Attach to Pet Frame").set(layout, false)
+	Setting(G, "Frame Size").set(layout, 150)
+end
+
+local function IsCopy(settings)
+	return settings ~= nil and settings.attached == false and settings.frameSize == 150
+end
+
+describe("Edit Mode › Layouts", function()
+	it("a new layout starts with the settings of the layout it was copied from", function()
+		local G = Start(TwoLayouts(2))
+		local LEM = G.NS.LibEditMode
+		eq(LEM:GetActiveLayoutName(), "Char", "active layout")
+		Detach(G, "Char")
+		G.MakeNewLayout("Char 2", 2, "Char")
+		eq(LEM:GetActiveLayoutName(), "Char 2", "the new layout is active")
+		ok(IsCopy(G.SimplePetTargetDB.layouts["Char 2"]), "settings copied")
+		ok(G.SimplePetTargetDB.layouts["Char 2"] ~= G.SimplePetTargetDB.layouts.Char, "a copy, not the same table")
+		eq(G.SimplePetTargetFrame:GetScale(), 1.5, "the frame keeps its size")
+		eq(Problems(G), "", "problems")
+	end)
+
+	it("a new account-wide layout gets the copy though it lands before the character-specific ones", function()
+		local G = Start(TwoLayouts(1))
+		local LEM = G.NS.LibEditMode
+		Detach(G, "Acct")
+		G.MakeNewLayout("New", 1, "Acct")
+		eq(G.LAYOUTS.layouts[2].layoutName, "New", "the new layout is second in the list")
+		eq(LEM:GetActiveLayoutName(), "New", "the new layout is active")
+		ok(IsCopy(G.SimplePetTargetDB.layouts.New), "settings copied to the new layout")
+		eq(G.SimplePetTargetDB.layouts.Char, nil, "the character-specific layout is left alone")
+		eq(G.SimplePetTargetFrame:GetScale(), 1.5, "the frame keeps its size")
+		eq(Problems(G), "", "problems")
+	end)
+
+	it("follows a new layout that takes the active layout's place in the list", function()
+		local G = Start(TwoLayouts(2))
+		local LEM = G.NS.LibEditMode
+		Detach(G, "Char")
+		eq(G.SimplePetTargetFrame:GetScale(), 1.5, "scale in the detached layout")
+		G.MakeNewLayout("New", 1, "Acct") -- a copy of the attached layout
+		eq(G.LAYOUTS.activeLayout, G.NUM_PRESET_LAYOUTS + 2, "the active index hasn't changed")
+		eq(LEM:GetActiveLayoutName(), "New", "the new layout is active")
+		eq(G.SimplePetTargetFrame:GetParent(), G.PetFrame, "attached, as the new layout says")
+		eq(G.SimplePetTargetFrame:GetScale(), 1, "scale in the new layout")
+		ok(IsCopy(G.SimplePetTargetDB.layouts.Char), "the other layout keeps its settings")
+		eq(Problems(G), "", "problems")
+	end)
+
+	it("copies from a preset layout, which the game reports by its localized name", function()
+		local G = Start(function(G) G.LAYOUT_STYLE_CLASSIC = "Klassisch" end)
+		local LEM = G.NS.LibEditMode
+		G.EditModeManagerFrame:SelectLayout(2)
+		eq(LEM:GetActiveLayoutName(), "Classic", "active layout")
+		Detach(G, "Classic")
+		G.MakeNewLayout("Mine too", 1, "Klassisch")
+		ok(IsCopy(G.SimplePetTargetDB.layouts["Mine too"]), "settings copied")
+		eq(Problems(G), "", "problems")
+	end)
+
+	it("keeps a layout's settings when it is renamed, and drops them when it is deleted", function()
+		local G = Start(TwoLayouts(1))
+		local LEM = G.NS.LibEditMode
+		Detach(G, "Acct")
+		G.RenameLayout("Acct", "Raid")
+		eq(LEM:GetActiveLayoutName(), "Raid", "active layout")
+		ok(IsCopy(G.SimplePetTargetDB.layouts.Raid), "settings under the new name")
+		eq(G.SimplePetTargetDB.layouts.Acct, nil, "settings under the old name")
+		eq(G.SimplePetTargetFrame:GetScale(), 1.5, "the frame keeps its size")
+
+		G.DeleteLayout("Raid")
+		eq(LEM:GetActiveLayoutName(), "Modern", "the game falls back to a preset")
+		eq(G.SimplePetTargetDB.layouts.Raid, nil, "settings of the deleted layout")
+		eq(G.SimplePetTargetFrame:GetParent(), G.PetFrame, "attached in the preset")
+		eq(Problems(G), "", "problems")
 	end)
 end)

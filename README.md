@@ -7,11 +7,12 @@ A World of Warcraft Forever addon that adds a **Pet Target Frame**: a small fram
 ## Features
 
 - Same design as the default Target of Target frame: round portrait, name, health bar and power bar
+- Health and power numbers that follow Blizzard's Status Text option (Numeric, Percentage or Both), or show while you point at the frame when that option is None, like the Pet Frame
 - Up to 4 debuffs with cooldown swipes and dispel-type borders, in combat too: they're shown through Blizzard's secure aura display, since the game doesn't let addons read auras in combat. Hover a debuff for its tooltip
 - Shows DEAD or UNCONSCIOUS like the default frame
 - Left-click to target your pet's target; click-casting and pings work on it too
 - Appears automatically whenever your pet has a target, including in combat
-- Follows your Blizzard settings for dispellable debuffs and class-icon portraits
+- Follows Blizzard's class-icon portrait options, and the `showDispelDebuffs` console variable the way Target of Target does (on friendly targets, only debuffs you can dispel)
 
 ## Turning it on or off
 
@@ -40,7 +41,7 @@ The repository folder is the addon folder. To test changes in game, link it into
 New-Item -ItemType Junction -Path "D:\WoW\World of Warcraft\_forever_\Interface\AddOns\SimplePetTarget" -Target "C:\Users\josep\claude\SimplePetTarget"
 ```
 
-Releases come from version tags (`vX.Y.Z`; a tag containing `beta` is a beta). CurseForge's automatic packaging builds and publishes the CurseForge file, and the **Release** workflow publishes the same zip as a [GitHub release](https://github.com/joseph3114/SimplePetTarget/releases), with notes from the commit messages since the previous tag. `.pkgmeta` leaves the `assets` folder (logos and the scripts that draw them), the tests, the GitHub workflows, `.luacheckrc`, `CLAUDE.md` and this README out of the package.
+Releases come from version tags (`vX.Y.Z`; a tag containing `beta` is a beta). CurseForge's automatic packaging builds and publishes the CurseForge file, and the **Release** workflow publishes the same zip as a [GitHub release](https://github.com/joseph3114/SimplePetTarget/releases), with notes from the commit messages since the previous tag. `.pkgmeta` leaves the `assets` folder (logos, the CurseForge description image and the scripts that draw them), the tests, the GitHub workflows, `.luacheckrc`, `CLAUDE.md` and this README out of the package.
 
 ### Checks
 

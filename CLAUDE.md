@@ -69,6 +69,7 @@ The aura APIs error for addon code while auras are secret.
 - The mock's layout helpers (`MakeNewLayout`, `RenameLayout`, `DeleteLayout`) follow Blizzard's order of events; the client has three preset layouts, so user layouts start at index 4.
 - Every test should end with `eq(Problems(G), "", "problems")` where it makes sense.
 - GitHub Actions has three workflows, Build, Lint and Tests, each with a README badge. Lua and luacheck come from Ubuntu packages (`lua5.1`, `lua-check`); downloads from lua.org timed out.
+- Build passes with a notice, without a zip, on a branch push whose commit already has a version tag: the packager skips it and the tag's run packages it.
 - Before suggesting a release, the user tests in game, with BugSack clean, in and out of combat and in Edit Mode.
 
 ## Releasing

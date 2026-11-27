@@ -25,8 +25,17 @@ jobs:
         with:
           args: -d
 
+      # On a branch push, the packager skips a commit that already carries a version tag ("Found
+      # future tag"): the tag's own run packages it. That happens when a release pushes main and its
+      # tag together.
       - name: Check the package
+        id: check
         run: |
+          if ! ls .release/*.zip >/dev/null 2>&1 && [ "$GITHUB_REF_TYPE" = "branch" ] && [ -n "$(git tag --points-at HEAD)" ]; then
+            echo "::notice::Not packaged here: this commit is tagged $(git tag --points-at HEAD | xargs), and the tag's run packages it."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           zip=$(ls .release/*.zip)
           unzip -l "$zip"
           for f in SimplePetTarget/SimplePetTarget.toc SimplePetTarget/SimplePetTarget.lua SimplePetTarget/SimplePetTarget.xml SimplePetTarget/Libs/LibEditMode/LibEditMode.lua; do
@@ -38,6 +47,7 @@ jobs:
           if unzip -p "$zip" SimplePetTarget/SimplePetTarget.toc | grep -q '@project-version@'; then echo "::error::the version was not filled in"; exit 1; fi
 
       - name: Upload the zip
+        if: steps.check.outputs.skipped != 'true'
         uses: actions/upload-artifact@v6
         with:
           name: SimplePetTarget
